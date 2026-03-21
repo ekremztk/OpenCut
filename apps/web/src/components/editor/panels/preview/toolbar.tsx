@@ -11,7 +11,6 @@ import {
 	PlayIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { OcSocialIcon } from "@opencut/ui/icons";
 import { Separator } from "@/components/ui/separator";
 
 export function PreviewToolbar({
@@ -57,16 +56,6 @@ export function PreviewToolbar({
 			</Button>
 
 			<div className="justify-self-end flex items-center gap-2.5">
-				<Button
-					variant="secondary"
-					size="sm"
-					className="[&_svg]:size-auto px-1 h-7"
-					onClick={onToggleFullscreen}
-					title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-				>
-					<OcSocialIcon size={20} />
-				</Button>
-				<Separator orientation="vertical" className="h-4" />
 				<Button
 					variant="text"
 					onClick={onToggleFullscreen}

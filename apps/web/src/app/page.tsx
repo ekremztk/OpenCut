@@ -1,6 +1,5 @@
-import { redirect } from 'next/navigation'
-import { randomUUID } from 'crypto'
+import { redirect } from "next/navigation";
 
 export default function Home() {
-  redirect(`/editor/${randomUUID()}`)
+	redirect("/projects");
 }

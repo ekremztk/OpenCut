@@ -5,12 +5,17 @@ import {
 } from "@mediapipe/tasks-vision";
 
 export interface DetectedFace {
-	/** 0..1 normalized, left=0 right=1. Uses full landmark bbox for head centering. */
+	/** 0..1 normalized, left=0 right=1. Computed from face oval bounding box. */
 	centerX: number;
 	/** 0..1 normalized, top=0 bottom=1. */
 	centerY: number;
-	/** 0..1, higher = mouth more open → speaking */
+	/** 0..1, higher = mouth more open → likely speaking */
 	mouthOpenRatio: number;
+	/**
+	 * Normalized width of the face oval bounding box.
+	 * Larger = face is closer to the camera (useful for dominant-face detection).
+	 */
+	bboxWidth: number;
 }
 
 let faceLandmarker: FaceLandmarker | null = null;
@@ -46,13 +51,17 @@ export async function loadFaceLandmarker(
 	return loadingPromise;
 }
 
-// Key landmark indices
+// Mouth landmarks
 const UPPER_LIP_IDX = 13;
 const LOWER_LIP_IDX = 14;
 const NOSE_TIP_IDX = 1;
 const CHIN_IDX = 152;
 
-// Face oval boundary landmarks — used for accurate HEAD width (not just face front)
+/**
+ * Face oval contour landmarks (36 points, official MediaPipe set).
+ * Spans from ear to ear — gives accurate head WIDTH even when face is turned sideways.
+ * Landmark 234 ≈ right ear, 454 ≈ left ear.
+ */
 const FACE_OVAL_INDICES = [
 	10, 338, 297, 332, 284, 251, 389, 356, 454,
 	323, 361, 288, 397, 365, 379, 378, 400, 377,
@@ -71,13 +80,10 @@ export function extractFaces(result: FaceLandmarkerResult): DetectedFace[] {
 
 		if (!upperLip || !lowerLip) continue;
 
-		// Head center X: use face oval bounding box.
-		// This correctly centers the head even when turned sideways —
-		// the oval spans from ear to ear rather than just eye-to-eye.
-		let minX = Infinity;
-		let maxX = -Infinity;
-		let minY = Infinity;
-		let maxY = -Infinity;
+		// Head center: bounding box of face oval landmarks
+		// This works correctly whether the face is frontal or turned sideways
+		let minX = Infinity, maxX = -Infinity;
+		let minY = Infinity, maxY = -Infinity;
 
 		for (const idx of FACE_OVAL_INDICES) {
 			const lm = landmarks[idx];
@@ -88,17 +94,20 @@ export function extractFaces(result: FaceLandmarkerResult): DetectedFace[] {
 			if (lm.y > maxY) maxY = lm.y;
 		}
 
+		if (!isFinite(minX)) continue;
+
 		const centerX = (minX + maxX) / 2;
 		const centerY = (minY + maxY) / 2;
+		const bboxWidth = maxX - minX;
 
-		// Mouth open ratio relative to face height
-		const faceHeight = Math.abs(
+		// Mouth open ratio relative to face height (nose tip → chin)
+		const faceH = Math.abs(
 			(chin?.y ?? lowerLip.y + 0.05) - (noseTip?.y ?? upperLip.y - 0.05),
 		);
 		const mouthOpen = Math.abs(lowerLip.y - upperLip.y);
-		const mouthOpenRatio = faceHeight > 0 ? mouthOpen / faceHeight : 0;
+		const mouthOpenRatio = faceH > 0 ? mouthOpen / faceH : 0;
 
-		faces.push({ centerX, centerY, mouthOpenRatio });
+		faces.push({ centerX, centerY, mouthOpenRatio, bboxWidth });
 	}
 
 	return faces;

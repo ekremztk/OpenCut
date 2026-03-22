@@ -6,6 +6,7 @@ import type { EditorCore } from "@/core";
 import type { VideoElement, VideoTrack } from "@/types/timeline";
 
 const SAMPLE_FPS = 8;
+const REFINE_FPS = 30;
 
 export interface ReframeProgress {
 	step: string;
@@ -48,8 +49,7 @@ export async function runReframe(
 		const { trackId, element } = videoElements[ei];
 		const basePercent = 10 + (ei / total) * 85;
 
-		const label =
-			total > 1 ? ` (clip ${ei + 1}/${total})` : "";
+		const label = total > 1 ? ` (clip ${ei + 1}/${total})` : "";
 
 		// 4. Sample frames: face detection + scene detection simultaneously
 		onProgress({
@@ -178,6 +178,47 @@ interface RawFrame extends FrameAnalysis {
 	// timeS here is element-local (from trimStart), NOT adjusted per-segment
 }
 
+/**
+ * Refines a coarse scene cut time by scanning backward at REFINE_FPS.
+ *
+ * The coarse detector fires AT the new scene's first sampled frame.
+ * We scan backward from coarseTimeS to (coarseTimeS - intervalS) at 1/REFINE_FPS
+ * steps to find the last frame of the OLD scene, then return the next frame
+ * as the precise cut point.
+ */
+async function refineSceneCutTime(
+	video: HTMLVideoElement,
+	sceneDetector: SceneDetector,
+	coarseTimeS: number,
+	intervalS: number,
+	trimStart: number,
+): Promise<number> {
+	const stepS = 1 / REFINE_FPS;
+	const searchStart = Math.max(0, coarseTimeS - intervalS);
+
+	// Scan forward from searchStart; find first frame the detector flags as cut
+	// Reset detector state with the frame just before searchStart
+	const preScanTime = Math.max(0, searchStart - stepS);
+	video.currentTime = trimStart + preScanTime;
+	await waitForSeek(video);
+	sceneDetector.reset();
+	sceneDetector.check(video); // seed detector with frame before scan
+
+	let firstCutFrameS = coarseTimeS; // fallback: original coarse time
+
+	for (let t = searchStart; t <= coarseTimeS + stepS / 2; t += stepS) {
+		video.currentTime = trimStart + t;
+		await waitForSeek(video);
+		const isCut = sceneDetector.check(video);
+		if (isCut) {
+			firstCutFrameS = t;
+			break;
+		}
+	}
+
+	return firstCutFrameS;
+}
+
 async function sampleVideoFrames({
 	url,
 	elementDuration,
@@ -207,9 +248,10 @@ async function sampleVideoFrames({
 			const interval = 1 / SAMPLE_FPS;
 			const totalFrames = Math.ceil(elementDuration * SAMPLE_FPS);
 			const frames: RawFrame[] = [];
-			const rawSceneCuts: number[] = [];
+			const rawCoarseCuts: number[] = [];
 			const sceneDetector = new SceneDetector();
 
+			// ── Coarse 8fps pass ──────────────────────────────────────────────
 			for (let i = 0; i < totalFrames; i++) {
 				const elementLocalTimeS = i * interval;
 				const videoTimeS = trimStart + elementLocalTimeS;
@@ -217,10 +259,10 @@ async function sampleVideoFrames({
 				video.currentTime = videoTimeS;
 				await waitForSeek(video);
 
-				// Scene detection first (before MediaPipe — uses same video frame)
+				// Scene detection
 				const isSceneCut = i > 0 && sceneDetector.check(video);
 				if (isSceneCut) {
-					rawSceneCuts.push(elementLocalTimeS);
+					rawCoarseCuts.push(elementLocalTimeS);
 				} else if (i === 0) {
 					sceneDetector.check(video); // initialize detector
 				}
@@ -236,9 +278,24 @@ async function sampleVideoFrames({
 				}
 			}
 
+			// ── Refine: find frame-accurate cut boundaries ────────────────────
+			// Each coarse cut is within ±(1/SAMPLE_FPS) of the real boundary.
+			// We scan at REFINE_FPS resolution to find the exact transition frame.
+			const refinedCuts: number[] = [];
+			for (const coarseTimeS of rawCoarseCuts) {
+				const refined = await refineSceneCutTime(
+					video,
+					sceneDetector,
+					coarseTimeS,
+					interval,
+					trimStart,
+				);
+				refinedCuts.push(refined);
+			}
+
 			video.src = "";
 
-			const sceneCutTimesS = filterCuts(rawSceneCuts, elementDuration);
+			const sceneCutTimesS = filterCuts(refinedCuts, elementDuration);
 			resolve({ frames, sceneCutTimesS });
 		});
 

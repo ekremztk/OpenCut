@@ -80,6 +80,7 @@ function buildTrackNodes({
 							opacity: element.opacity,
 							blendMode: element.blendMode,
 							effects: element.effects,
+							coverMode: element.type === "video" ? element.coverMode : undefined,
 						}),
 					);
 				}

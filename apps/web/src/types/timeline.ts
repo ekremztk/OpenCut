@@ -106,6 +106,7 @@ export interface VideoElement extends BaseTimelineElement {
 	opacity: number;
 	blendMode?: BlendMode;
 	effects?: Effect[];
+	coverMode?: boolean;
 }
 
 export interface ImageElement extends BaseTimelineElement {

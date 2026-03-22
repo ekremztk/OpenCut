@@ -25,6 +25,7 @@ export interface VisualNodeParams {
 	opacity: number;
 	blendMode?: BlendMode;
 	effects?: Effect[];
+	coverMode?: boolean;
 }
 
 export abstract class VisualNode<
@@ -76,10 +77,9 @@ export abstract class VisualNode<
 			animations: this.params.animations,
 			localTime: animationLocalTime,
 		});
-		const containScale = Math.min(
-			renderer.width / sourceWidth,
-			renderer.height / sourceHeight,
-		);
+		const containScale = this.params.coverMode
+			? Math.max(renderer.width / sourceWidth, renderer.height / sourceHeight)
+			: Math.min(renderer.width / sourceWidth, renderer.height / sourceHeight);
 		const scaledWidth = sourceWidth * containScale * transform.scale;
 		const scaledHeight = sourceHeight * containScale * transform.scale;
 		const x = renderer.width / 2 + transform.position.x - scaledWidth / 2;

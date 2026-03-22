@@ -14,7 +14,7 @@ import {
 	ColorsIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
-import { Youtube } from "lucide-react";
+import { Youtube, Smartphone } from "lucide-react";
 
 export const TAB_KEYS = [
 	"media",
@@ -24,6 +24,7 @@ export const TAB_KEYS = [
 	"effects",
 	"transitions",
 	"captions",
+	"reframe",
 	"filters",
 	"adjustment",
 	"youtube",
@@ -66,6 +67,10 @@ export const tabs = {
 	captions: {
 		icon: createHugeiconsIcon({ icon: ClosedCaptionIcon }),
 		label: "Captions",
+	},
+	reframe: {
+		icon: ({ className }: { className?: string }) => <Smartphone className={className} />,
+		label: "Reframe",
 	},
 	filters: {
 		icon: createHugeiconsIcon({ icon: ColorsIcon }),

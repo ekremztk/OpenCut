@@ -42,6 +42,10 @@ function formatTime(seconds: number): string {
 	return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+function captionStorageKey(projectId: string) {
+	return `captions_draft_${projectId}`;
+}
+
 export function Captions() {
 	const editor = useEditor();
 
@@ -54,15 +58,42 @@ export function Captions() {
 	const [processingStep, setProcessingStep] = useState("");
 	const [error, setError] = useState<string | null>(null);
 
-	const [captions, setCaptions] = useState<CaptionChunk[] | null>(null);
+	const [captions, setCaptions] = useState<CaptionChunk[] | null>(() => {
+		// Restore captions from localStorage on mount so page refreshes don't lose work
+		try {
+			const projectId = editor.project.getActiveOrNull()?.metadata.id;
+			if (!projectId) return null;
+			const saved = localStorage.getItem(captionStorageKey(projectId));
+			return saved ? (JSON.parse(saved) as CaptionChunk[]) : null;
+		} catch {
+			return null;
+		}
+	});
 	const [applied, setApplied] = useState(false);
 
 	const containerRef = useRef<HTMLDivElement>(null);
+
+	const saveCaptionsDraft = (chunks: CaptionChunk[]) => {
+		try {
+			const projectId = editor.project.getActiveOrNull()?.metadata.id;
+			if (!projectId) return;
+			localStorage.setItem(captionStorageKey(projectId), JSON.stringify(chunks));
+		} catch {}
+	};
+
+	const clearCaptionsDraft = () => {
+		try {
+			const projectId = editor.project.getActiveOrNull()?.metadata.id;
+			if (!projectId) return;
+			localStorage.removeItem(captionStorageKey(projectId));
+		} catch {}
+	};
 
 	const reset = () => {
 		setCaptions(null);
 		setApplied(false);
 		setError(null);
+		clearCaptionsDraft();
 	};
 
 	const handleGenerate = async () => {
@@ -120,6 +151,7 @@ export function Captions() {
 			}
 
 			setCaptions(chunks);
+			saveCaptionsDraft(chunks);
 		} catch (err) {
 			console.error("[Captions]", err);
 			setError(err instanceof Error ? err.message : "Unexpected error");
@@ -152,6 +184,7 @@ export function Captions() {
 		}
 
 		setApplied(true);
+		clearCaptionsDraft();
 	};
 
 	const handleDownloadSrt = () => {

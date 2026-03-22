@@ -112,11 +112,12 @@ export function Captions() {
 			if (updates.fontWeight !== undefined) styleUpdates.fontWeight = newStyle.fontWeight;
 			if (updates.textAlign !== undefined) styleUpdates.textAlign = newStyle.textAlign;
 			if (updates.positionY !== undefined) {
-				// positionY 0-100 → canvas Y offset (centered at 0, range roughly -50 to 50)
+				// positionY 0-100 → canvas Y offset (centered at 0, range -0.5 to 0.5)
 				const yOffset = (newStyle.positionY - 50) / 100;
+				const currentTransform = (el as TextElement).transform;
 				styleUpdates.transform = {
-					...(el as TextElement).transform,
-					y: yOffset,
+					...currentTransform,
+					position: { ...currentTransform.position, y: yOffset },
 				};
 			}
 
@@ -212,7 +213,10 @@ export function Captions() {
 					fontWeight: style.fontWeight,
 					color: style.color,
 					textAlign: style.textAlign,
-					transform: { ...DEFAULT_TEXT_ELEMENT.transform, y: yOffset },
+					transform: {
+					...DEFAULT_TEXT_ELEMENT.transform,
+					position: { ...DEFAULT_TEXT_ELEMENT.transform.position, y: yOffset },
+				},
 				},
 			});
 		}

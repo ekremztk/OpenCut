@@ -1,27 +1,34 @@
 import type { DetectedFace } from "./mediapipe-face";
 
 export interface FrameAnalysis {
+	/** Element-local time in seconds (0 = start of this specific segment). */
 	timeS: number;
 	faces: DetectedFace[];
 }
 
 export interface CropKeyframe {
-	timeS: number; // element-local time (seconds from element start)
-	offsetX: number; // canvas pixels, applied to transform.position.x
+	/** Element-local time in seconds. */
+	timeS: number;
+	/** Canvas-pixel offset for transform.position.x */
+	offsetX: number;
 }
 
-// EMA smoothing factor: 0.12 = smooth and stable
+// EMA smoothing — 0.12 = smooth tracking, stable on slow pans
 const EMA_ALPHA = 0.12;
 
-// Mouth open threshold to be considered "speaking"
+// Mouth open ratio to qualify as "speaking"
 const SPEAKING_THRESHOLD = 0.018;
 
-// If no face for this long, start drifting to center (seconds)
+// Seconds of no face before slowly drifting to center
 const DRIFT_TO_CENTER_AFTER_S = 1.5;
 
-// Simplification: skip keyframe if change is less than this (pixels)
-const MIN_KEYFRAME_DELTA_PX = 6;
+// Minimum change (px) to emit a keyframe — keeps keyframe count low
+const MIN_KEYFRAME_DELTA_PX = 5;
 
+/**
+ * Calculates crop keyframes for a single segment (scene-cut boundary or full clip).
+ * Each call starts with a fresh EMA — never bleeds across scene cuts.
+ */
 export function calculateCropKeyframes({
 	frames,
 	sourceWidth,
@@ -35,55 +42,64 @@ export function calculateCropKeyframes({
 	canvasWidth: number;
 	canvasHeight: number;
 }): CropKeyframe[] {
-	// Cover scale: how much the source is scaled to fill the canvas height
-	const coverScale = Math.max(canvasWidth / sourceWidth, canvasHeight / sourceHeight);
-	const scaledSourceWidth = sourceWidth * coverScale;
+	if (frames.length === 0) return [];
 
-	// Maximum x offset from center (in canvas pixels)
+	const coverScale = Math.max(
+		canvasWidth / sourceWidth,
+		canvasHeight / sourceHeight,
+	);
+	const scaledSourceWidth = sourceWidth * coverScale;
 	const maxOffsetX = (scaledSourceWidth - canvasWidth) / 2;
 
+	// State — fresh for every segment
 	let smoothedOffsetX = 0;
-	let lastFaceX: number | null = null;
+	let initialized = false;
 	let lastSpeakerX: number | null = null;
-	let lastFaceTime = -99;
-	let prevSmoothedX = 0;
+	let lastFaceX: number | null = null;
+	let lastFaceTimeS = -99;
 
 	const rawKeyframes: CropKeyframe[] = [];
 
-	for (const frame of frames) {
-		const { timeS, faces } = frame;
-
-		let targetNormalizedX: number | null = null;
+	for (const { timeS, faces } of frames) {
+		let targetNormalizedX = 0.5; // default: center
 
 		if (faces.length > 0) {
-			lastFaceTime = timeS;
+			lastFaceTimeS = timeS;
 
-			// Find the speaking face (highest mouth open ratio above threshold)
-			const speakingFaces = faces.filter(f => f.mouthOpenRatio > SPEAKING_THRESHOLD);
+			const speakingFaces = faces.filter(
+				(f) => f.mouthOpenRatio > SPEAKING_THRESHOLD,
+			);
+
 			let activeFace: DetectedFace | null = null;
 
 			if (speakingFaces.length === 1) {
-				// One person speaking — track them
+				// Clear single speaker
 				activeFace = speakingFaces[0];
 			} else if (speakingFaces.length > 1) {
-				// Multiple people speaking — stay on last known speaker
+				// Multiple speaking — stay on whoever was speaking last
 				if (lastSpeakerX !== null) {
-					// Pick the face closest to last speaker position
 					activeFace = speakingFaces.reduce((best, f) =>
-						Math.abs(f.centerX - lastSpeakerX!) < Math.abs(best.centerX - lastSpeakerX!)
-							? f : best
+						Math.abs(f.centerX - lastSpeakerX!) <
+						Math.abs(best.centerX - lastSpeakerX!)
+							? f
+							: best,
 					);
 				} else {
-					activeFace = speakingFaces[0];
+					// No prior speaker — pick the one with more open mouth
+					activeFace = speakingFaces.reduce((best, f) =>
+						f.mouthOpenRatio > best.mouthOpenRatio ? f : best,
+					);
 				}
 			} else {
-				// Nobody speaking (laughing, silence) — use last speaker if recent
+				// Nobody clearly speaking: hold last speaker, don't drift yet
 				if (lastSpeakerX !== null) {
 					targetNormalizedX = lastSpeakerX;
 				} else {
-					// Fall back to closest face to center
+					// No speaker history — track face closest to center
 					activeFace = faces.reduce((best, f) =>
-						Math.abs(f.centerX - 0.5) < Math.abs(best.centerX - 0.5) ? f : best
+						Math.abs(f.centerX - 0.5) < Math.abs(best.centerX - 0.5)
+							? f
+							: best,
 					);
 				}
 			}
@@ -95,41 +111,32 @@ export function calculateCropKeyframes({
 			}
 		} else {
 			// No face detected
-			const timeSinceLastFace = timeS - lastFaceTime;
-			if (timeSinceLastFace > DRIFT_TO_CENTER_AFTER_S) {
-				// Slowly drift to center (normalized 0.5)
-				targetNormalizedX = 0.5;
+			const gap = timeS - lastFaceTimeS;
+			if (gap > DRIFT_TO_CENTER_AFTER_S) {
+				targetNormalizedX = 0.5; // drift to center
 			} else if (lastFaceX !== null) {
-				// Hold last known position
-				targetNormalizedX = lastFaceX;
-			} else {
-				targetNormalizedX = 0.5;
+				targetNormalizedX = lastFaceX; // hold
 			}
 		}
 
-		if (targetNormalizedX === null) targetNormalizedX = 0.5;
-
-		// Convert normalized face X (0..1) to canvas offset
-		// face at 0.0 (leftmost) → pan left (positive offset)
-		// face at 0.5 (center)   → 0 offset
-		// face at 1.0 (rightmost) → pan right (negative offset)
+		// Map normalized face X to canvas offsetX:
+		// face at 0.5 (center) → offsetX 0
+		// face at 0.0 (far left) → pan right → positive offsetX
+		// face at 1.0 (far right) → pan left → negative offsetX
 		const targetOffsetX = -(targetNormalizedX - 0.5) * 2 * maxOffsetX;
 
-		// Apply EMA smoothing
-		// Detect sudden large jump (scene cut): > 40% of frame width change
-		const jumpThreshold = sourceWidth * coverScale * 0.4;
-		if (Math.abs(targetOffsetX - smoothedOffsetX) > jumpThreshold) {
-			// Scene cut — snap immediately
+		// First frame of segment: snap immediately (no lerp)
+		if (!initialized) {
 			smoothedOffsetX = targetOffsetX;
+			initialized = true;
 		} else {
-			smoothedOffsetX = EMA_ALPHA * targetOffsetX + (1 - EMA_ALPHA) * smoothedOffsetX;
+			smoothedOffsetX =
+				EMA_ALPHA * targetOffsetX + (1 - EMA_ALPHA) * smoothedOffsetX;
 		}
 
 		rawKeyframes.push({ timeS, offsetX: smoothedOffsetX });
-		prevSmoothedX = smoothedOffsetX;
 	}
 
-	// Simplify: remove keyframes where change is negligible
 	return simplifyKeyframes(rawKeyframes, MIN_KEYFRAME_DELTA_PX);
 }
 
@@ -139,21 +146,19 @@ function simplifyKeyframes(
 ): CropKeyframe[] {
 	if (keyframes.length === 0) return [];
 
-	const simplified: CropKeyframe[] = [keyframes[0]];
+	const out: CropKeyframe[] = [keyframes[0]];
 	let lastKept = keyframes[0];
 
 	for (let i = 1; i < keyframes.length - 1; i++) {
-		const delta = Math.abs(keyframes[i].offsetX - lastKept.offsetX);
-		if (delta >= minDelta) {
-			simplified.push(keyframes[i]);
+		if (Math.abs(keyframes[i].offsetX - lastKept.offsetX) >= minDelta) {
+			out.push(keyframes[i]);
 			lastKept = keyframes[i];
 		}
 	}
 
-	// Always include the last frame
 	if (keyframes.length > 1) {
-		simplified.push(keyframes[keyframes.length - 1]);
+		out.push(keyframes[keyframes.length - 1]);
 	}
 
-	return simplified;
+	return out;
 }

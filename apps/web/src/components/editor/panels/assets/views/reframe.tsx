@@ -100,9 +100,9 @@ export function ReframeView() {
 							<div className="flex flex-col gap-0.5">
 								<p className="text-sm font-medium">Reframe applied!</p>
 								<p className="text-muted-foreground text-xs">
-									{results.length} clip{results.length !== 1 ? "s" : ""} reframed
-									with {totalKeyframes} position keyframes.
-									Canvas switched to 1080×1920.
+									{results.reduce((s, r) => s + r.sceneCount, 0)} scene(s)
+									· {totalKeyframes} keyframes
+									· 1080×1920
 								</p>
 							</div>
 						</div>

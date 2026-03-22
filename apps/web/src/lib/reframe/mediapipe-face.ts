@@ -5,10 +5,12 @@ import {
 } from "@mediapipe/tasks-vision";
 
 export interface DetectedFace {
-	centerX: number; // 0..1 normalized, left to right
-	centerY: number; // 0..1 normalized, top to bottom
-	mouthOpenRatio: number; // 0..1, higher = more open
-	confidence: number;
+	/** 0..1 normalized, left=0 right=1. Uses full landmark bbox for head centering. */
+	centerX: number;
+	/** 0..1 normalized, top=0 bottom=1. */
+	centerY: number;
+	/** 0..1, higher = mouth more open → speaking */
+	mouthOpenRatio: number;
 }
 
 let faceLandmarker: FaceLandmarker | null = null;
@@ -44,42 +46,59 @@ export async function loadFaceLandmarker(
 	return loadingPromise;
 }
 
-// Landmark indices (MediaPipe FaceLandmarker 478-point model)
-const LEFT_EYE_IDX = 33;
-const RIGHT_EYE_IDX = 263;
+// Key landmark indices
 const UPPER_LIP_IDX = 13;
 const LOWER_LIP_IDX = 14;
 const NOSE_TIP_IDX = 1;
 const CHIN_IDX = 152;
 
+// Face oval boundary landmarks — used for accurate HEAD width (not just face front)
+const FACE_OVAL_INDICES = [
+	10, 338, 297, 332, 284, 251, 389, 356, 454,
+	323, 361, 288, 397, 365, 379, 378, 400, 377,
+	152, 148, 176, 149, 150, 136, 172, 58, 132,
+	93, 234, 127, 162, 21, 54, 103, 67, 109,
+];
+
 export function extractFaces(result: FaceLandmarkerResult): DetectedFace[] {
 	const faces: DetectedFace[] = [];
 
 	for (const landmarks of result.faceLandmarks) {
-		const leftEye = landmarks[LEFT_EYE_IDX];
-		const rightEye = landmarks[RIGHT_EYE_IDX];
 		const upperLip = landmarks[UPPER_LIP_IDX];
 		const lowerLip = landmarks[LOWER_LIP_IDX];
 		const noseTip = landmarks[NOSE_TIP_IDX];
 		const chin = landmarks[CHIN_IDX];
 
-		if (!leftEye || !rightEye || !upperLip || !lowerLip) continue;
+		if (!upperLip || !lowerLip) continue;
 
-		// Face horizontal center: midpoint of eyes (works even when face is turned)
-		const centerX = (leftEye.x + rightEye.x) / 2;
-		const centerY = (leftEye.y + rightEye.y) / 2;
+		// Head center X: use face oval bounding box.
+		// This correctly centers the head even when turned sideways —
+		// the oval spans from ear to ear rather than just eye-to-eye.
+		let minX = Infinity;
+		let maxX = -Infinity;
+		let minY = Infinity;
+		let maxY = -Infinity;
 
-		// Mouth open ratio relative to face height (nose tip to chin)
-		const faceHeight = Math.abs((chin?.y ?? lowerLip.y + 0.05) - (noseTip?.y ?? upperLip.y - 0.05));
+		for (const idx of FACE_OVAL_INDICES) {
+			const lm = landmarks[idx];
+			if (!lm) continue;
+			if (lm.x < minX) minX = lm.x;
+			if (lm.x > maxX) maxX = lm.x;
+			if (lm.y < minY) minY = lm.y;
+			if (lm.y > maxY) maxY = lm.y;
+		}
+
+		const centerX = (minX + maxX) / 2;
+		const centerY = (minY + maxY) / 2;
+
+		// Mouth open ratio relative to face height
+		const faceHeight = Math.abs(
+			(chin?.y ?? lowerLip.y + 0.05) - (noseTip?.y ?? upperLip.y - 0.05),
+		);
 		const mouthOpen = Math.abs(lowerLip.y - upperLip.y);
 		const mouthOpenRatio = faceHeight > 0 ? mouthOpen / faceHeight : 0;
 
-		faces.push({
-			centerX,
-			centerY,
-			mouthOpenRatio,
-			confidence: 1.0, // MediaPipe doesn't expose per-face confidence
-		});
+		faces.push({ centerX, centerY, mouthOpenRatio });
 	}
 
 	return faces;
@@ -87,9 +106,9 @@ export function extractFaces(result: FaceLandmarkerResult): DetectedFace[] {
 
 export async function detectFacesInFrame(
 	landmarker: FaceLandmarker,
-	videoElement: HTMLVideoElement,
+	video: HTMLVideoElement,
 	timestampMs: number,
 ): Promise<DetectedFace[]> {
-	const result = landmarker.detectForVideo(videoElement, timestampMs);
+	const result = landmarker.detectForVideo(video, timestampMs);
 	return extractFaces(result);
 }

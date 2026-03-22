@@ -45,3 +45,11 @@ export interface CaptionChunk {
 	startTime: number;
 	duration: number;
 }
+
+export interface TranscriptionWord {
+	word: string;
+	punctuated_word: string;
+	start: number;
+	end: number;
+	confidence: number;
+}

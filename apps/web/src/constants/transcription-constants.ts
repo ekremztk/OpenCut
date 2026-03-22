@@ -7,14 +7,17 @@ import type { LanguageCode } from "@/types/language";
 
 const SUPPORTED_TRANSCRIPTION_LANGS: ReadonlyArray<LanguageCode> = [
 	"en",
+	"tr",
 	"es",
 	"it",
 	"fr",
 	"de",
 	"pt",
 	"ru",
+	"ar",
 	"ja",
 	"zh",
+	"ko",
 ];
 
 export const TRANSCRIPTION_LANGUAGES = LANGUAGES.filter((language) =>

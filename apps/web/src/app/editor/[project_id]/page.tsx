@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useParams } from "next/navigation";
 import {
 	ResizablePanelGroup,
@@ -16,6 +17,7 @@ import { Onboarding } from "@/components/editor/onboarding";
 import { MigrationDialog } from "@/components/editor/dialogs/migration-dialog";
 import { usePanelStore } from "@/stores/panel-store";
 import { usePasteMedia } from "@/hooks/use-paste-media";
+import { useClipImport } from "@/hooks/use-clip-import";
 import { MobileGate } from "@/components/editor/mobile-gate";
 
 export default function Editor() {
@@ -28,7 +30,9 @@ export default function Editor() {
 				<div className="bg-background flex h-screen w-screen flex-col overflow-hidden">
 					<EditorHeader />
 					<div className="min-h-0 min-w-0 flex-1">
-						<EditorLayout />
+						<Suspense>
+							<EditorLayout projectId={projectId} />
+						</Suspense>
 					</div>
 					<Onboarding />
 					<MigrationDialog />
@@ -38,8 +42,9 @@ export default function Editor() {
 	);
 }
 
-function EditorLayout() {
+function EditorLayout({ projectId }: { projectId: string }) {
 	usePasteMedia();
+	useClipImport(projectId);
 	const { panels, setPanel } = usePanelStore();
 
 	return (

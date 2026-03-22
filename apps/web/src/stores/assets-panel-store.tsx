@@ -14,6 +14,7 @@ import {
 	ColorsIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { Youtube } from "lucide-react";
 
 export const TAB_KEYS = [
 	"media",
@@ -25,6 +26,7 @@ export const TAB_KEYS = [
 	"captions",
 	"filters",
 	"adjustment",
+	"youtube",
 	"settings",
 ] as const;
 
@@ -72,6 +74,10 @@ export const tabs = {
 	adjustment: {
 		icon: createHugeiconsIcon({ icon: SlidersHorizontalIcon }),
 		label: "Adjustment",
+	},
+	youtube: {
+		icon: ({ className }: { className?: string }) => <Youtube className={className} />,
+		label: "YouTube",
 	},
 	settings: {
 		icon: createHugeiconsIcon({ icon: Settings01Icon }),

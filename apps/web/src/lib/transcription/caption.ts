@@ -4,6 +4,17 @@ import {
 	MIN_CAPTION_DURATION_SECONDS,
 } from "@/constants/transcription-constants";
 
+function capOverlaps(captions: CaptionChunk[]): CaptionChunk[] {
+	for (let i = 0; i < captions.length - 1; i++) {
+		const nextStart = captions[i + 1].startTime;
+		const end = captions[i].startTime + captions[i].duration;
+		if (end > nextStart) {
+			captions[i] = { ...captions[i], duration: Math.max(0.1, nextStart - captions[i].startTime) };
+		}
+	}
+	return captions;
+}
+
 export function buildCaptionChunks({
 	segments,
 	wordsPerChunk = DEFAULT_WORDS_PER_CAPTION,
@@ -45,7 +56,7 @@ export function buildCaptionChunks({
 		}
 	}
 
-	return captions;
+	return capOverlaps(captions);
 }
 
 /**
@@ -80,7 +91,7 @@ export function buildCaptionChunksFromWords({
 
 	for (const word of words) {
 		const wordText = word.punctuated_word || word.word;
-		const addedChars = currentChars === 0 ? wordText.length : wordText.length + 1; // +1 for space
+		const addedChars = currentChars === 0 ? wordText.length : wordText.length + 1;
 
 		if (currentChars > 0 && currentChars + addedChars > maxCharsPerLine) {
 			flush();
@@ -91,5 +102,5 @@ export function buildCaptionChunksFromWords({
 	}
 
 	flush();
-	return chunks;
+	return capOverlaps(chunks);
 }

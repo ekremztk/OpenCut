@@ -1,8 +1,8 @@
 import { Textarea } from "@/components/ui/textarea";
 import { FontPicker } from "@/components/ui/font-picker";
-import type { TextElement } from "@/types/timeline";
+import type { TextElement, TimelineTrack } from "@/types/timeline";
 import { NumberField } from "@/components/ui/number-field";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import {
 	Section,
 	SectionContent,
@@ -44,21 +44,68 @@ import {
 import { OcTextHeightIcon, OcTextWidthIcon } from "@opencut/ui/icons";
 import { cn } from "@/utils/ui";
 
+function isCaptionTrack(track: TimelineTrack): boolean {
+	return (
+		track.elements.length > 1 &&
+		track.elements.every((el) => el.name.startsWith("Caption "))
+	);
+}
+
 export function TextProperties({
 	element,
 	trackId,
+	track,
 }: {
 	element: TextElement;
 	trackId: string;
+	track: TimelineTrack;
 }) {
+	const isCaption = isCaptionTrack(track);
+	const [mode, setMode] = useState<"caption" | "track">("caption");
+
 	return (
 		<div className="flex h-full flex-col">
-			<ContentSection element={element} trackId={trackId} />
-			<TransformSection element={element} trackId={trackId} />
-			<BlendingSection element={element} trackId={trackId} />
-			<TypographySection element={element} trackId={trackId} />
-			<SpacingSection element={element} trackId={trackId} />
-			<BackgroundSection element={element} trackId={trackId} />
+			{isCaption && (
+				<div className="flex border-b">
+					<button
+						onClick={() => setMode("caption")}
+						className={cn(
+							"flex-1 py-2 text-xs font-medium transition-colors",
+							mode === "caption"
+								? "text-foreground border-b-2 border-primary"
+								: "text-muted-foreground hover:text-foreground"
+						)}
+					>
+						Caption
+					</button>
+					<button
+						onClick={() => setMode("track")}
+						className={cn(
+							"flex-1 py-2 text-xs font-medium transition-colors",
+							mode === "track"
+								? "text-foreground border-b-2 border-primary"
+								: "text-muted-foreground hover:text-foreground"
+						)}
+					>
+						Track
+					</button>
+				</div>
+			)}
+
+			{(!isCaption || mode === "caption") && (
+				<>
+					<ContentSection element={element} trackId={trackId} />
+					<TransformSection element={element} trackId={trackId} />
+					<BlendingSection element={element} trackId={trackId} />
+					<TypographySection element={element} trackId={trackId} />
+					<SpacingSection element={element} trackId={trackId} />
+					<BackgroundSection element={element} trackId={trackId} />
+				</>
+			)}
+
+			{isCaption && mode === "track" && (
+				<TrackStyleSection track={track} />
+			)}
 		</div>
 	);
 }
@@ -728,5 +775,115 @@ function BackgroundSection({
 				</SectionFields>
 			</SectionContent>
 		</Section>
+	);
+}
+
+// ── Track mode: apply style changes to ALL captions in the track ──────────
+
+function TrackStyleSection({ track }: { track: TimelineTrack }) {
+	const editor = useEditor();
+
+	const applyToAll = (updates: Partial<TextElement>) => {
+		const elementUpdates = track.elements.map((el) => ({
+			trackId: track.id,
+			elementId: el.id,
+			updates,
+		}));
+		if (elementUpdates.length > 0) {
+			editor.timeline.updateElements({ updates: elementUpdates });
+		}
+	};
+
+	const first = track.elements[0] as TextElement | undefined;
+	if (!first) return null;
+
+	return (
+		<div className="flex flex-col">
+			<Section collapsible={false} sectionKey="track:typography" showTopBorder={false}>
+				<SectionHeader>
+					<SectionTitle>Typography</SectionTitle>
+				</SectionHeader>
+				<SectionContent>
+					<SectionFields>
+						<SectionField label="Font">
+							<FontPicker
+								defaultValue={first.fontFamily}
+								onValueChange={(value) => applyToAll({ fontFamily: value })}
+							/>
+						</SectionField>
+						<SectionField label="Size">
+							<NumberField
+								value={first.fontSize.toString()}
+								min={MIN_FONT_SIZE}
+								max={MAX_FONT_SIZE}
+								onChange={(e) => {
+									const v = parseFloat(e.target.value);
+									if (!Number.isNaN(v)) applyToAll({ fontSize: clamp({ value: v, min: MIN_FONT_SIZE, max: MAX_FONT_SIZE }) });
+								}}
+								onBlur={(e) => {
+									const v = parseFloat(e.target.value);
+									if (!Number.isNaN(v)) applyToAll({ fontSize: clamp({ value: v, min: MIN_FONT_SIZE, max: MAX_FONT_SIZE }) });
+								}}
+								icon={<HugeiconsIcon icon={TextFontIcon} />}
+							/>
+						</SectionField>
+						<SectionField label="Color">
+							<ColorPicker
+								value={uppercase({ string: first.color.replace("#", "") })}
+								onChange={(color) => applyToAll({ color: `#${color}` })}
+								onChangeEnd={(color) => applyToAll({ color: `#${color}` })}
+							/>
+						</SectionField>
+					</SectionFields>
+				</SectionContent>
+			</Section>
+
+			<Section collapsible={false} sectionKey="track:style">
+				<SectionHeader>
+					<SectionTitle>Style</SectionTitle>
+				</SectionHeader>
+				<SectionContent>
+					<SectionFields>
+						<SectionField label="Weight">
+							<div className="flex gap-1">
+								{(["normal", "bold"] as const).map((w) => (
+									<button
+										key={w}
+										onClick={() => applyToAll({ fontWeight: w })}
+										className={cn(
+											"flex-1 rounded border py-1 text-xs transition-colors",
+											w === "bold" && "font-bold",
+											first.fontWeight === w
+												? "border-primary bg-primary/10 text-primary"
+												: "border-border text-muted-foreground hover:border-muted-foreground"
+										)}
+									>
+										{w === "bold" ? "Bold" : "Normal"}
+									</button>
+								))}
+							</div>
+						</SectionField>
+						<SectionField label="Align">
+							<div className="flex gap-1">
+								{(["left", "center", "right"] as const).map((align) => (
+									<button
+										key={align}
+										onClick={() => applyToAll({ textAlign: align })}
+										className={cn(
+											"flex flex-1 items-center justify-center rounded border py-1 transition-colors",
+											first.textAlign === align
+												? "border-primary bg-primary/10 text-primary"
+												: "border-border text-muted-foreground hover:border-muted-foreground"
+										)}
+									>
+										<span className="text-xs">{align[0].toUpperCase()}</span>
+									</button>
+								))}
+							</div>
+						</SectionField>
+					</SectionFields>
+				</SectionContent>
+			</Section>
+		</div>
 	);
 }

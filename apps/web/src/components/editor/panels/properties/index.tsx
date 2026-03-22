@@ -21,7 +21,7 @@ function ElementProperties({
 	element: TimelineElement;
 }) {
 	if (element.type === "text") {
-		return <TextProperties element={element} trackId={track.id} />;
+		return <TextProperties element={element} trackId={track.id} track={track} />;
 	}
 	if (element.type === "audio") {
 		return <AudioProperties />;

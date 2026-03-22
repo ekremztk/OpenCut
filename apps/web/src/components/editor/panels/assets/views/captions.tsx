@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
 import {
 	Select,
 	SelectContent,
@@ -25,7 +27,8 @@ import {
 } from "@/lib/transcription/caption";
 import { captionChunksToSrt, downloadSrt } from "@/lib/transcription/srt";
 import type { CaptionChunk, TranscriptionLanguage } from "@/types/transcription";
-import { Cloud, Cpu, Download, CheckCheck, RotateCcw } from "lucide-react";
+import type { TextElement } from "@/types/timeline";
+import { Cloud, Cpu, Download, CheckCheck, RotateCcw, AlignLeft, AlignCenter, AlignRight } from "lucide-react";
 import { cn } from "@/utils/ui";
 
 type Engine = "deepgram" | "whisper";
@@ -35,6 +38,29 @@ const CHAR_OPTIONS = [
 	{ label: "Medium (32)", value: 32 },
 	{ label: "Long (42)", value: 42 },
 ];
+
+const FONT_SIZE_OPTIONS = [
+	{ label: "S", value: 48 },
+	{ label: "M", value: 65 },
+	{ label: "L", value: 85 },
+	{ label: "XL", value: 110 },
+];
+
+interface CaptionStyle {
+	fontSize: number;
+	color: string;
+	fontWeight: "normal" | "bold";
+	textAlign: "left" | "center" | "right";
+	positionY: number; // 0–100, percentage of canvas height
+}
+
+const DEFAULT_CAPTION_STYLE: CaptionStyle = {
+	fontSize: 65,
+	color: "#ffffff",
+	fontWeight: "bold",
+	textAlign: "center",
+	positionY: 80,
+};
 
 function formatTime(seconds: number): string {
 	const m = Math.floor(seconds / 60);
@@ -54,14 +80,52 @@ export function Captions() {
 	const [error, setError] = useState<string | null>(null);
 
 	const [captions, setCaptions] = useState<CaptionChunk[] | null>(null);
+	const [captionTrackId, setCaptionTrackId] = useState<string | null>(null);
 	const [applied, setApplied] = useState(false);
+	const [style, setStyle] = useState<CaptionStyle>(DEFAULT_CAPTION_STYLE);
 
 	const containerRef = useRef<HTMLDivElement>(null);
 
 	const reset = () => {
 		setCaptions(null);
+		setCaptionTrackId(null);
 		setApplied(false);
 		setError(null);
+		setStyle(DEFAULT_CAPTION_STYLE);
+	};
+
+	// Apply a style update to ALL caption elements in the track
+	const applyStyleToAll = (updates: Partial<CaptionStyle>) => {
+		const newStyle = { ...style, ...updates };
+		setStyle(newStyle);
+
+		if (!captionTrackId) return;
+
+		const track = editor.timeline.getTrackById({ trackId: captionTrackId });
+		if (!track) return;
+
+		const elementUpdates = track.elements.map((el) => {
+			const styleUpdates: Partial<TextElement> = {};
+
+			if (updates.fontSize !== undefined) styleUpdates.fontSize = newStyle.fontSize;
+			if (updates.color !== undefined) styleUpdates.color = newStyle.color;
+			if (updates.fontWeight !== undefined) styleUpdates.fontWeight = newStyle.fontWeight;
+			if (updates.textAlign !== undefined) styleUpdates.textAlign = newStyle.textAlign;
+			if (updates.positionY !== undefined) {
+				// positionY 0-100 → canvas Y offset (centered at 0, range roughly -50 to 50)
+				const yOffset = (newStyle.positionY - 50) / 100;
+				styleUpdates.transform = {
+					...(el as TextElement).transform,
+					y: yOffset,
+				};
+			}
+
+			return { trackId: captionTrackId, elementId: el.id, updates: styleUpdates };
+		});
+
+		if (elementUpdates.length > 0) {
+			editor.timeline.updateElements({ updates: elementUpdates });
+		}
 	};
 
 	const handleGenerate = async () => {
@@ -70,6 +134,7 @@ export function Captions() {
 			setError(null);
 			setCaptions(null);
 			setApplied(false);
+			setCaptionTrackId(null);
 			setProcessingStep("Extracting audio from timeline...");
 
 			const audioBlob = await extractTimelineAudio({
@@ -131,6 +196,7 @@ export function Captions() {
 		if (!captions || captions.length === 0) return;
 
 		const trackId = editor.timeline.addTrack({ type: "text", index: 0 });
+		const yOffset = (style.positionY - 50) / 100;
 
 		for (let i = 0; i < captions.length; i++) {
 			const caption = captions[i];
@@ -142,12 +208,16 @@ export function Captions() {
 					content: caption.text,
 					duration: caption.duration,
 					startTime: caption.startTime,
-					fontSize: 65,
-					fontWeight: "bold",
+					fontSize: style.fontSize,
+					fontWeight: style.fontWeight,
+					color: style.color,
+					textAlign: style.textAlign,
+					transform: { ...DEFAULT_TEXT_ELEMENT.transform, y: yOffset },
 				},
 			});
 		}
 
+		setCaptionTrackId(trackId);
 		setApplied(true);
 	};
 
@@ -217,7 +287,7 @@ export function Captions() {
 					</Select>
 				</div>
 
-				{/* Max chars per line (Deepgram only — word timestamps) */}
+				{/* Max chars per line (Deepgram only) */}
 				{engine === "deepgram" && (
 					<div>
 						<Label className="mb-2 block">Characters per line</Label>
@@ -259,7 +329,7 @@ export function Captions() {
 					</Button>
 				)}
 
-				{/* Caption preview */}
+				{/* Caption preview + actions */}
 				{captions && captions.length > 0 && (
 					<div className="flex flex-col gap-3">
 						<div className="flex items-center justify-between">
@@ -272,7 +342,8 @@ export function Captions() {
 							</button>
 						</div>
 
-						<div className="border-border max-h-52 overflow-y-auto rounded-md border">
+						{/* Preview list */}
+						<div className="border-border max-h-40 overflow-y-auto rounded-md border">
 							{captions.map((chunk, i) => (
 								<div
 									key={i}
@@ -289,6 +360,7 @@ export function Captions() {
 							))}
 						</div>
 
+						{/* Apply button */}
 						<Button
 							className="w-full"
 							onClick={handleApply}
@@ -301,6 +373,7 @@ export function Captions() {
 							)}
 						</Button>
 
+						{/* Download SRT */}
 						<Button
 							variant="outline"
 							className="w-full"
@@ -311,6 +384,121 @@ export function Captions() {
 						</Button>
 					</div>
 				)}
+
+				{/* ── Bulk Style Controls (visible after applying) ── */}
+				{applied && captionTrackId && (
+					<div className="border-border flex flex-col gap-4 rounded-md border p-3">
+						<p className="text-sm font-semibold">Caption Style (All)</p>
+
+						{/* Font size */}
+						<div>
+							<Label className="mb-2 block text-xs">Font Size</Label>
+							<div className="grid grid-cols-4 gap-1.5">
+								{FONT_SIZE_OPTIONS.map((opt) => (
+									<button
+										key={opt.value}
+										onClick={() => applyStyleToAll({ fontSize: opt.value })}
+										className={cn(
+											"rounded-md border py-1.5 text-xs font-medium transition-colors",
+											style.fontSize === opt.value
+												? "border-primary bg-primary/10 text-primary"
+												: "border-border text-muted-foreground hover:border-muted-foreground"
+										)}
+									>
+										{opt.label}
+									</button>
+								))}
+							</div>
+						</div>
+
+						{/* Color */}
+						<div>
+							<Label className="mb-2 block text-xs">Color</Label>
+							<div className="flex items-center gap-2">
+								<input
+									type="color"
+									value={style.color}
+									onChange={(e) => applyStyleToAll({ color: e.target.value })}
+									className="h-8 w-10 cursor-pointer rounded border-0 bg-transparent p-0"
+								/>
+								<Input
+									value={style.color}
+									onChange={(e) => {
+										const v = e.target.value;
+										if (/^#[0-9a-fA-F]{0,6}$/.test(v)) applyStyleToAll({ color: v });
+									}}
+									className="h-8 font-mono text-xs"
+									maxLength={7}
+								/>
+							</div>
+						</div>
+
+						{/* Font weight */}
+						<div>
+							<Label className="mb-2 block text-xs">Weight</Label>
+							<div className="grid grid-cols-2 gap-2">
+								{(["normal", "bold"] as const).map((w) => (
+									<button
+										key={w}
+										onClick={() => applyStyleToAll({ fontWeight: w })}
+										className={cn(
+											"rounded-md border py-1.5 text-xs transition-colors",
+											w === "bold" && "font-bold",
+											style.fontWeight === w
+												? "border-primary bg-primary/10 text-primary"
+												: "border-border text-muted-foreground hover:border-muted-foreground"
+										)}
+									>
+										{w === "bold" ? "Bold" : "Normal"}
+									</button>
+								))}
+							</div>
+						</div>
+
+						{/* Text align */}
+						<div>
+							<Label className="mb-2 block text-xs">Alignment</Label>
+							<div className="grid grid-cols-3 gap-2">
+								{(["left", "center", "right"] as const).map((align) => (
+									<button
+										key={align}
+										onClick={() => applyStyleToAll({ textAlign: align })}
+										className={cn(
+											"flex items-center justify-center rounded-md border py-1.5 transition-colors",
+											style.textAlign === align
+												? "border-primary bg-primary/10 text-primary"
+												: "border-border text-muted-foreground hover:border-muted-foreground"
+										)}
+									>
+										{align === "left" && <AlignLeft className="size-3.5" />}
+										{align === "center" && <AlignCenter className="size-3.5" />}
+										{align === "right" && <AlignRight className="size-3.5" />}
+									</button>
+								))}
+							</div>
+						</div>
+
+						{/* Vertical position */}
+						<div>
+							<div className="mb-2 flex items-center justify-between">
+								<Label className="text-xs">Vertical Position</Label>
+								<span className="text-muted-foreground text-xs">{style.positionY}%</span>
+							</div>
+							<Slider
+								min={0}
+								max={100}
+								step={1}
+								value={[style.positionY]}
+								onValueChange={([v]) => applyStyleToAll({ positionY: v })}
+							/>
+							<div className="text-muted-foreground mt-1 flex justify-between text-[10px]">
+								<span>Top</span>
+								<span>Bottom</span>
+							</div>
+						</div>
+					</div>
+				)}
+
 			</div>
 		</ScrollArea>
 	);

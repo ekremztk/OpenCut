@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { toast } from "sonner";
 import { useEditor } from "@/hooks/use-editor";
 import { useYouTubeStore } from "@/stores/youtube-store";
@@ -10,10 +10,13 @@ import { processMediaAssets } from "@/lib/media/processing";
 /**
  * Reads ?clipUrl, ?clipTitle, ?clipDesc URL params.
  * On first load: imports the video as a media asset and pre-fills YouTube metadata.
+ * After importing, removes the params from the URL so page refreshes don't re-import.
  * Must be called inside EditorProvider (project must be loaded).
  */
 export function useClipImport(projectId: string) {
 	const searchParams = useSearchParams();
+	const router = useRouter();
+	const pathname = usePathname();
 	const editor = useEditor();
 	const { loadForProject } = useYouTubeStore();
 	const hasRun = useRef(false);
@@ -69,6 +72,14 @@ export function useClipImport(projectId: string) {
 				}
 
 				toast.success("Clip imported! Find it in the Media panel.", { id: "clip-import" });
+
+				// Remove clip params from URL so refreshing the page won't re-import
+				const params = new URLSearchParams(searchParams.toString());
+				params.delete("clipUrl");
+				params.delete("clipTitle");
+				params.delete("clipDesc");
+				const newUrl = params.size > 0 ? `${pathname}?${params.toString()}` : pathname;
+				router.replace(newUrl);
 			} catch (error) {
 				console.error("[ClipImport]", error);
 				toast.error("Failed to import clip", { id: "clip-import" });

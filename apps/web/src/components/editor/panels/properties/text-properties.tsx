@@ -2,7 +2,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { FontPicker } from "@/components/ui/font-picker";
 import type { TextElement, TimelineTrack } from "@/types/timeline";
 import { NumberField } from "@/components/ui/number-field";
-import { useRef, useState } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import {
 	Section,
 	SectionContent,
@@ -778,109 +778,438 @@ function BackgroundSection({
 	);
 }
 
-// ── Track mode: apply style changes to ALL captions in the track ──────────
+
+// ── Track mode: full caption style panel (Character / Stroke / Transform / Shadow) ──
+
+function useBatchNumberField({
+	getDisplayValue,
+	buildUpdates,
+	track,
+	min,
+	max,
+}: {
+	getDisplayValue: () => string;
+	buildUpdates: (value: number) => Partial<TextElement>;
+	track: TimelineTrack;
+	min?: number;
+	max?: number;
+}) {
+	const editor = useEditor();
+	const [draft, setDraft] = useState<string | null>(null);
+	const currentDisplay = getDisplayValue();
+	const displayValue = draft ?? currentDisplay;
+
+	const doPreview = (value: number) => {
+		const v = min !== undefined && max !== undefined ? clamp({ value, min, max }) : value;
+		editor.timeline.previewElements({
+			updates: track.elements.map((el) => ({ trackId: track.id, elementId: el.id, updates: buildUpdates(v) })),
+		});
+		setDraft(String(v));
+	};
+
+	return {
+		displayValue,
+		onFocus: () => setDraft(currentDisplay),
+		onChange: (e: ChangeEvent<HTMLInputElement>) => setDraft(e.target.value),
+		onBlur: () => {
+			const parsed = parseFloat(draft ?? currentDisplay);
+			if (!Number.isNaN(parsed)) {
+				const v = min !== undefined && max !== undefined ? clamp({ value: parsed, min, max }) : parsed;
+				editor.timeline.updateElements({
+					updates: track.elements.map((el) => ({ trackId: track.id, elementId: el.id, updates: buildUpdates(v) })),
+				});
+				setDraft(null);
+			} else {
+				setDraft(null);
+			}
+		},
+		scrubTo: doPreview,
+		commitScrub: () => { editor.timeline.commitPreview(); setDraft(null); },
+	};
+}
 
 function TrackStyleSection({ track }: { track: TimelineTrack }) {
 	const editor = useEditor();
-
-	const applyToAll = (updates: Partial<TextElement>) => {
-		const elementUpdates = track.elements.map((el) => ({
-			trackId: track.id,
-			elementId: el.id,
-			updates,
-		}));
-		if (elementUpdates.length > 0) {
-			editor.timeline.updateElements({ updates: elementUpdates });
-		}
-	};
-
 	const first = track.elements[0] as TextElement | undefined;
 	if (!first) return null;
 
+	const stroke = first.stroke ?? { enabled: false, color: "#000000", width: 4, outsideOnly: true };
+	const shadow = first.shadow ?? { enabled: false, color: "#000000", offsetX: 3, offsetY: 3, blur: 6, opacity: 0.8 };
+
+	const batchUpdate = (updates: Partial<TextElement>) => {
+		editor.timeline.updateElements({
+			updates: track.elements.map((el) => ({ trackId: track.id, elementId: el.id, updates })),
+		});
+	};
+
+	// ── Character fields ──
+	const fontSize = useBatchNumberField({
+		getDisplayValue: () => first.fontSize.toString(),
+		buildUpdates: (v) => ({ fontSize: v }),
+		track,
+		min: MIN_FONT_SIZE,
+		max: MAX_FONT_SIZE,
+	});
+
+	const lineSpacing = useBatchNumberField({
+		getDisplayValue: () => (first.lineHeight ?? DEFAULT_LINE_HEIGHT).toFixed(1),
+		buildUpdates: (v) => ({ lineHeight: Math.max(0.1, Math.round(v * 10) / 10) }),
+		track,
+		min: 0.5,
+		max: 5,
+	});
+
+	// ── Stroke fields ──
+	const strokeWidth = useBatchNumberField({
+		getDisplayValue: () => stroke.width.toString(),
+		buildUpdates: (v) => ({ stroke: { ...stroke, width: v } }),
+		track,
+		min: 0,
+		max: 50,
+	});
+
+	// ── Transform fields ──
+	const positionX = useBatchNumberField({
+		getDisplayValue: () => Math.round(first.transform.position.x).toString(),
+		buildUpdates: (v) => ({ transform: { ...first.transform, position: { ...first.transform.position, x: v } } }),
+		track,
+	});
+
+	const positionY = useBatchNumberField({
+		getDisplayValue: () => Math.round(first.transform.position.y).toString(),
+		buildUpdates: (v) => ({ transform: { ...first.transform, position: { ...first.transform.position, y: v } } }),
+		track,
+	});
+
+	const scale = useBatchNumberField({
+		getDisplayValue: () => Math.round(first.transform.scale * 100).toString(),
+		buildUpdates: (v) => ({ transform: { ...first.transform, scale: Math.max(1, v) / 100 } }),
+		track,
+		min: 1,
+		max: 1000,
+	});
+
+	const opacity = useBatchNumberField({
+		getDisplayValue: () => Math.round(first.opacity * 100).toString(),
+		buildUpdates: (v) => ({ opacity: clamp({ value: v, min: 0, max: 100 }) / 100 }),
+		track,
+		min: 0,
+		max: 100,
+	});
+
+	// ── Shadow fields ──
+	const shadowOffsetX = useBatchNumberField({
+		getDisplayValue: () => Math.round(shadow.offsetX).toString(),
+		buildUpdates: (v) => ({ shadow: { ...shadow, offsetX: v } }),
+		track,
+		min: -200,
+		max: 200,
+	});
+
+	const shadowOffsetY = useBatchNumberField({
+		getDisplayValue: () => Math.round(shadow.offsetY).toString(),
+		buildUpdates: (v) => ({ shadow: { ...shadow, offsetY: v } }),
+		track,
+		min: -200,
+		max: 200,
+	});
+
+	const shadowBlur = useBatchNumberField({
+		getDisplayValue: () => Math.round(shadow.blur).toString(),
+		buildUpdates: (v) => ({ shadow: { ...shadow, blur: v } }),
+		track,
+		min: 0,
+		max: 100,
+	});
+
+	const shadowOpacity = useBatchNumberField({
+		getDisplayValue: () => Math.round((shadow.opacity ?? 1) * 100).toString(),
+		buildUpdates: (v) => ({ shadow: { ...shadow, opacity: clamp({ value: v, min: 0, max: 100 }) / 100 } }),
+		track,
+		min: 0,
+		max: 100,
+	});
+
 	return (
 		<div className="flex flex-col">
-			<Section collapsible={false} sectionKey="track:typography" showTopBorder={false}>
-				<SectionHeader>
-					<SectionTitle>Typography</SectionTitle>
-				</SectionHeader>
+			{/* ── Character ── */}
+			<Section collapsible sectionKey="track:character" showTopBorder={false}>
+				<SectionHeader><SectionTitle>Character</SectionTitle></SectionHeader>
 				<SectionContent>
 					<SectionFields>
 						<SectionField label="Font">
 							<FontPicker
 								defaultValue={first.fontFamily}
-								onValueChange={(value) => applyToAll({ fontFamily: value })}
+								onValueChange={(v) => batchUpdate({ fontFamily: v })}
 							/>
 						</SectionField>
 						<SectionField label="Size">
 							<NumberField
-								value={first.fontSize.toString()}
+								value={fontSize.displayValue}
 								min={MIN_FONT_SIZE}
 								max={MAX_FONT_SIZE}
-								onChange={(e) => {
-									const v = parseFloat(e.target.value);
-									if (!Number.isNaN(v)) applyToAll({ fontSize: clamp({ value: v, min: MIN_FONT_SIZE, max: MAX_FONT_SIZE }) });
-								}}
-								onBlur={(e) => {
-									const v = parseFloat(e.target.value);
-									if (!Number.isNaN(v)) applyToAll({ fontSize: clamp({ value: v, min: MIN_FONT_SIZE, max: MAX_FONT_SIZE }) });
-								}}
+								onFocus={fontSize.onFocus}
+								onChange={fontSize.onChange}
+								onBlur={fontSize.onBlur}
+								onScrub={fontSize.scrubTo}
+								onScrubEnd={fontSize.commitScrub}
 								icon={<HugeiconsIcon icon={TextFontIcon} />}
 							/>
 						</SectionField>
 						<SectionField label="Color">
 							<ColorPicker
 								value={uppercase({ string: first.color.replace("#", "") })}
-								onChange={(color) => applyToAll({ color: `#${color}` })}
-								onChangeEnd={(color) => applyToAll({ color: `#${color}` })}
+								onChange={(c) => batchUpdate({ color: `#${c}` })}
+								onChangeEnd={(c) => batchUpdate({ color: `#${c}` })}
+							/>
+						</SectionField>
+						<SectionField label="Line spacing">
+							<NumberField
+								value={lineSpacing.displayValue}
+								min={0.5}
+								max={5}
+								onFocus={lineSpacing.onFocus}
+								onChange={lineSpacing.onChange}
+								onBlur={lineSpacing.onBlur}
+								onScrub={lineSpacing.scrubTo}
+								onScrubEnd={lineSpacing.commitScrub}
+								icon={<OcTextHeightIcon size={14} />}
+							/>
+						</SectionField>
+						<SectionField label="Alignment">
+							<div className="flex gap-1">
+								{(["left", "center", "right"] as const).map((align) => (
+									<button
+										key={align}
+										onClick={() => batchUpdate({ textAlign: align })}
+										className={cn(
+											"flex flex-1 items-center justify-center rounded border py-1 text-xs transition-colors",
+											first.textAlign === align
+												? "border-primary bg-primary/10 text-primary"
+												: "border-border text-muted-foreground hover:border-muted-foreground"
+										)}
+									>
+										{align === "left" ? "L" : align === "center" ? "C" : "R"}
+									</button>
+								))}
+							</div>
+						</SectionField>
+					</SectionFields>
+				</SectionContent>
+			</Section>
+
+			{/* ── Stroke ── */}
+			<Section
+				collapsible
+				sectionKey="track:stroke"
+				defaultOpen={stroke.enabled}
+			>
+				<SectionHeader
+					trailing={
+						<Button
+							variant="ghost"
+							size="icon"
+							onClick={(e) => {
+								e.stopPropagation();
+								batchUpdate({ stroke: { ...stroke, enabled: !stroke.enabled } });
+							}}
+						>
+							<HugeiconsIcon icon={stroke.enabled ? ViewIcon : ViewOffSlashIcon} />
+						</Button>
+					}
+				>
+					<SectionTitle>Stroke</SectionTitle>
+				</SectionHeader>
+				<SectionContent className={cn(!stroke.enabled && "pointer-events-none opacity-50")}>
+					<SectionFields>
+						<SectionField label="Color">
+							<ColorPicker
+								value={uppercase({ string: stroke.color.replace("#", "") })}
+								onChange={(c) => batchUpdate({ stroke: { ...stroke, color: `#${c}` } })}
+								onChangeEnd={(c) => batchUpdate({ stroke: { ...stroke, color: `#${c}` } })}
+							/>
+						</SectionField>
+						<SectionField label="Size">
+							<NumberField
+								value={strokeWidth.displayValue}
+								min={0}
+								max={50}
+								onFocus={strokeWidth.onFocus}
+								onChange={strokeWidth.onChange}
+								onBlur={strokeWidth.onBlur}
+								onScrub={strokeWidth.scrubTo}
+								onScrubEnd={strokeWidth.commitScrub}
+								icon="W"
+							/>
+						</SectionField>
+						<SectionField label="Outside only">
+							<div className="flex gap-1">
+								{([true, false] as const).map((val) => (
+									<button
+										key={String(val)}
+										onClick={() => batchUpdate({ stroke: { ...stroke, outsideOnly: val } })}
+										className={cn(
+											"flex-1 rounded border py-1 text-xs transition-colors",
+											stroke.outsideOnly === val
+												? "border-primary bg-primary/10 text-primary"
+												: "border-border text-muted-foreground hover:border-muted-foreground"
+										)}
+									>
+										{val ? "On" : "Off"}
+									</button>
+								))}
+							</div>
+						</SectionField>
+					</SectionFields>
+				</SectionContent>
+			</Section>
+
+			{/* ── Transform ── */}
+			<Section collapsible sectionKey="track:transform">
+				<SectionHeader><SectionTitle>Transform</SectionTitle></SectionHeader>
+				<SectionContent>
+					<SectionFields>
+						<div className="flex items-start gap-2">
+							<SectionField label="X" className="w-1/2">
+								<NumberField
+									value={positionX.displayValue}
+									onFocus={positionX.onFocus}
+									onChange={positionX.onChange}
+									onBlur={positionX.onBlur}
+									onScrub={positionX.scrubTo}
+									onScrubEnd={positionX.commitScrub}
+									icon="X"
+								/>
+							</SectionField>
+							<SectionField label="Y" className="w-1/2">
+								<NumberField
+									value={positionY.displayValue}
+									onFocus={positionY.onFocus}
+									onChange={positionY.onChange}
+									onBlur={positionY.onBlur}
+									onScrub={positionY.scrubTo}
+									onScrubEnd={positionY.commitScrub}
+									icon="Y"
+								/>
+							</SectionField>
+						</div>
+						<SectionField label="Zoom">
+							<NumberField
+								value={scale.displayValue}
+								min={1}
+								max={1000}
+								onFocus={scale.onFocus}
+								onChange={scale.onChange}
+								onBlur={scale.onBlur}
+								onScrub={scale.scrubTo}
+								onScrubEnd={scale.commitScrub}
+								icon="%"
+							/>
+						</SectionField>
+						<SectionField label="Opacity">
+							<NumberField
+								value={opacity.displayValue}
+								min={0}
+								max={100}
+								onFocus={opacity.onFocus}
+								onChange={opacity.onChange}
+								onBlur={opacity.onBlur}
+								onScrub={opacity.scrubTo}
+								onScrubEnd={opacity.commitScrub}
+								icon="%"
 							/>
 						</SectionField>
 					</SectionFields>
 				</SectionContent>
 			</Section>
 
-			<Section collapsible={false} sectionKey="track:style">
-				<SectionHeader>
-					<SectionTitle>Style</SectionTitle>
+			{/* ── Drop Shadow ── */}
+			<Section
+				collapsible
+				sectionKey="track:shadow"
+				defaultOpen={shadow.enabled}
+			>
+				<SectionHeader
+					trailing={
+						<Button
+							variant="ghost"
+							size="icon"
+							onClick={(e) => {
+								e.stopPropagation();
+								batchUpdate({ shadow: { ...shadow, enabled: !shadow.enabled } });
+							}}
+						>
+							<HugeiconsIcon icon={shadow.enabled ? ViewIcon : ViewOffSlashIcon} />
+						</Button>
+					}
+				>
+					<SectionTitle>Drop Shadow</SectionTitle>
 				</SectionHeader>
-				<SectionContent>
+				<SectionContent className={cn(!shadow.enabled && "pointer-events-none opacity-50")}>
 					<SectionFields>
-						<SectionField label="Weight">
-							<div className="flex gap-1">
-								{(["normal", "bold"] as const).map((w) => (
-									<button
-										key={w}
-										onClick={() => applyToAll({ fontWeight: w })}
-										className={cn(
-											"flex-1 rounded border py-1 text-xs transition-colors",
-											w === "bold" && "font-bold",
-											first.fontWeight === w
-												? "border-primary bg-primary/10 text-primary"
-												: "border-border text-muted-foreground hover:border-muted-foreground"
-										)}
-									>
-										{w === "bold" ? "Bold" : "Normal"}
-									</button>
-								))}
-							</div>
+						<SectionField label="Color">
+							<ColorPicker
+								value={uppercase({ string: shadow.color.replace("#", "") })}
+								onChange={(c) => batchUpdate({ shadow: { ...shadow, color: `#${c}` } })}
+								onChangeEnd={(c) => batchUpdate({ shadow: { ...shadow, color: `#${c}` } })}
+							/>
 						</SectionField>
-						<SectionField label="Align">
-							<div className="flex gap-1">
-								{(["left", "center", "right"] as const).map((align) => (
-									<button
-										key={align}
-										onClick={() => applyToAll({ textAlign: align })}
-										className={cn(
-											"flex flex-1 items-center justify-center rounded border py-1 transition-colors",
-											first.textAlign === align
-												? "border-primary bg-primary/10 text-primary"
-												: "border-border text-muted-foreground hover:border-muted-foreground"
-										)}
-									>
-										<span className="text-xs">{align[0].toUpperCase()}</span>
-									</button>
-								))}
-							</div>
-						</SectionField>
+						<div className="flex items-start gap-2">
+							<SectionField label="X Offset" className="w-1/2">
+								<NumberField
+									value={shadowOffsetX.displayValue}
+									min={-200}
+									max={200}
+									onFocus={shadowOffsetX.onFocus}
+									onChange={shadowOffsetX.onChange}
+									onBlur={shadowOffsetX.onBlur}
+									onScrub={shadowOffsetX.scrubTo}
+									onScrubEnd={shadowOffsetX.commitScrub}
+									icon="X"
+								/>
+							</SectionField>
+							<SectionField label="Y Offset" className="w-1/2">
+								<NumberField
+									value={shadowOffsetY.displayValue}
+									min={-200}
+									max={200}
+									onFocus={shadowOffsetY.onFocus}
+									onChange={shadowOffsetY.onChange}
+									onBlur={shadowOffsetY.onBlur}
+									onScrub={shadowOffsetY.scrubTo}
+									onScrubEnd={shadowOffsetY.commitScrub}
+									icon="Y"
+								/>
+							</SectionField>
+						</div>
+						<div className="flex items-start gap-2">
+							<SectionField label="Blur" className="w-1/2">
+								<NumberField
+									value={shadowBlur.displayValue}
+									min={0}
+									max={100}
+									onFocus={shadowBlur.onFocus}
+									onChange={shadowBlur.onChange}
+									onBlur={shadowBlur.onBlur}
+									onScrub={shadowBlur.scrubTo}
+									onScrubEnd={shadowBlur.commitScrub}
+									icon="B"
+								/>
+							</SectionField>
+							<SectionField label="Opacity" className="w-1/2">
+								<NumberField
+									value={shadowOpacity.displayValue}
+									min={0}
+									max={100}
+									onFocus={shadowOpacity.onFocus}
+									onChange={shadowOpacity.onChange}
+									onBlur={shadowOpacity.onBlur}
+									onScrub={shadowOpacity.scrubTo}
+									onScrubEnd={shadowOpacity.commitScrub}
+									icon="%"
+								/>
+							</SectionField>
+						</div>
 					</SectionFields>
 				</SectionContent>
 			</Section>

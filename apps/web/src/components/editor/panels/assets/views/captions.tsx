@@ -48,6 +48,7 @@ export function Captions() {
 	const [engine, setEngine] = useState<Engine>("deepgram");
 	const [language, setLanguage] = useState<TranscriptionLanguage>("auto");
 	const [maxChars, setMaxChars] = useState(32);
+	const [maxLines, setMaxLines] = useState<1 | 2>(1);
 
 	const [isProcessing, setIsProcessing] = useState(false);
 	const [processingStep, setProcessingStep] = useState("");
@@ -93,6 +94,7 @@ export function Captions() {
 					chunks = buildCaptionChunksFromWords({
 						words: result.words,
 						maxCharsPerLine: maxChars,
+						maxLines,
 					});
 				} else {
 					chunks = buildCaptionChunks({ segments: result.segments });
@@ -218,27 +220,49 @@ export function Captions() {
 					</Select>
 				</div>
 
-				{/* Max chars per line (Deepgram only) */}
+				{/* Max chars per line + line count (Deepgram only) */}
 				{engine === "deepgram" && (
-					<div>
-						<Label className="mb-2 block">Characters per line</Label>
-						<div className="grid grid-cols-3 gap-2">
-							{CHAR_OPTIONS.map((opt) => (
-								<button
-									key={opt.value}
-									onClick={() => setMaxChars(opt.value)}
-									className={cn(
-										"rounded-md border px-2 py-1.5 text-xs font-medium transition-colors",
-										maxChars === opt.value
-											? "border-primary bg-primary/10 text-primary"
-											: "border-border text-muted-foreground hover:border-muted-foreground"
-									)}
-								>
-									{opt.label}
-								</button>
-							))}
+					<>
+						<div>
+							<Label className="mb-2 block">Characters per line</Label>
+							<div className="grid grid-cols-3 gap-2">
+								{CHAR_OPTIONS.map((opt) => (
+									<button
+										key={opt.value}
+										onClick={() => setMaxChars(opt.value)}
+										className={cn(
+											"rounded-md border px-2 py-1.5 text-xs font-medium transition-colors",
+											maxChars === opt.value
+												? "border-primary bg-primary/10 text-primary"
+												: "border-border text-muted-foreground hover:border-muted-foreground"
+										)}
+									>
+										{opt.label}
+									</button>
+								))}
+							</div>
 						</div>
-					</div>
+
+						<div>
+							<Label className="mb-2 block">Lines per subtitle</Label>
+							<div className="grid grid-cols-2 gap-2">
+								{([1, 2] as const).map((n) => (
+									<button
+										key={n}
+										onClick={() => setMaxLines(n)}
+										className={cn(
+											"rounded-md border py-1.5 text-xs font-medium transition-colors",
+											maxLines === n
+												? "border-primary bg-primary/10 text-primary"
+												: "border-border text-muted-foreground hover:border-muted-foreground"
+										)}
+									>
+										{n === 1 ? "1 line" : "2 lines"}
+									</button>
+								))}
+							</div>
+						</div>
+					</>
 				)}
 
 				{/* Error */}

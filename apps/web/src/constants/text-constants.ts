@@ -1,11 +1,11 @@
-import type { TextElement } from "@/types/timeline";
+import type { TextElement, TextStroke, TextShadow } from "@/types/timeline";
 import {
 	DEFAULT_OPACITY,
 	DEFAULT_TRANSFORM,
 	TIMELINE_CONSTANTS,
 } from "./timeline-constants";
 
-export const MIN_FONT_SIZE = 5;
+export const MIN_FONT_SIZE = 1;
 export const MAX_FONT_SIZE = 300;
 
 /**
@@ -30,6 +30,22 @@ export const DEFAULT_TEXT_BACKGROUND = {
 	offsetY: 0,
 };
 
+export const DEFAULT_TEXT_STROKE: TextStroke = {
+	enabled: false,
+	color: "#000000",
+	width: 4,
+	outsideOnly: true,
+};
+
+export const DEFAULT_TEXT_SHADOW: TextShadow = {
+	enabled: false,
+	color: "#000000",
+	offsetX: 3,
+	offsetY: 3,
+	blur: 6,
+	opacity: 0.8,
+};
+
 export const DEFAULT_TEXT_ELEMENT: Omit<TextElement, "id"> = {
 	type: "text",
 	name: "Text",
@@ -50,4 +66,6 @@ export const DEFAULT_TEXT_ELEMENT: Omit<TextElement, "id"> = {
 	trimEnd: 0,
 	transform: DEFAULT_TRANSFORM,
 	opacity: DEFAULT_OPACITY,
+	stroke: DEFAULT_TEXT_STROKE,
+	shadow: DEFAULT_TEXT_SHADOW,
 };

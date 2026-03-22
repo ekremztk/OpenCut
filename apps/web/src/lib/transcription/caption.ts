@@ -61,44 +61,58 @@ export function buildCaptionChunks({
 
 /**
  * Builds caption chunks from word-level timestamps (Deepgram output).
- * Groups words by character limit — more precise than segment-based chunking.
+ * Supports single-line (maxLines=1) and double-line (maxLines=2) modes.
  */
 export function buildCaptionChunksFromWords({
 	words,
-	maxCharsPerLine = 42,
+	maxCharsPerLine = 32,
+	maxLines = 1,
 	minDuration = MIN_CAPTION_DURATION_SECONDS,
 }: {
 	words: TranscriptionWord[];
 	maxCharsPerLine?: number;
+	maxLines?: 1 | 2;
 	minDuration?: number;
 }): CaptionChunk[] {
 	if (!words || words.length === 0) return [];
 
 	const chunks: CaptionChunk[] = [];
-	let currentWords: TranscriptionWord[] = [];
-	let currentChars = 0;
+	// Each entry is one line of words
+	let lines: TranscriptionWord[][] = [[]];
+	let currentLineChars = 0;
 
 	const flush = () => {
-		if (currentWords.length === 0) return;
-		const text = currentWords.map((w) => w.punctuated_word || w.word).join(" ");
-		const startTime = currentWords[0].start;
-		const endTime = currentWords[currentWords.length - 1].end;
+		if (lines[0].length === 0) return;
+		const allWords = lines.flat();
+		const text = lines
+			.filter((l) => l.length > 0)
+			.map((lineWords) => lineWords.map((w) => w.punctuated_word || w.word).join(" "))
+			.join("\n");
+		const startTime = allWords[0].start;
+		const endTime = allWords[allWords.length - 1].end;
 		const duration = Math.max(minDuration, endTime - startTime);
 		chunks.push({ text, startTime, duration });
-		currentWords = [];
-		currentChars = 0;
+		lines = [[]];
+		currentLineChars = 0;
 	};
 
 	for (const word of words) {
 		const wordText = word.punctuated_word || word.word;
-		const addedChars = currentChars === 0 ? wordText.length : wordText.length + 1;
+		const spaceNeeded = currentLineChars === 0 ? 0 : 1;
+		const totalNeeded = currentLineChars + spaceNeeded + wordText.length;
 
-		if (currentChars > 0 && currentChars + addedChars > maxCharsPerLine) {
-			flush();
+		if (currentLineChars > 0 && totalNeeded > maxCharsPerLine) {
+			if (maxLines >= 2 && lines.length < 2) {
+				// Start a second line within the same chunk
+				lines.push([]);
+				currentLineChars = 0;
+			} else {
+				flush();
+			}
 		}
 
-		currentWords.push(word);
-		currentChars += addedChars;
+		lines[lines.length - 1].push(word);
+		currentLineChars += (currentLineChars === 0 ? 0 : 1) + wordText.length;
 	}
 
 	flush();

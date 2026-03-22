@@ -128,6 +128,22 @@ export interface TextBackground {
 	offsetY?: number;
 }
 
+export interface TextStroke {
+	enabled: boolean;
+	color: string;
+	width: number;       // canvas pixels
+	outsideOnly: boolean;
+}
+
+export interface TextShadow {
+	enabled: boolean;
+	color: string;
+	offsetX: number;    // canvas pixels
+	offsetY: number;    // canvas pixels
+	blur: number;       // canvas pixels
+	opacity: number;    // 0–1
+}
+
 export interface TextElement extends BaseTimelineElement {
 	type: "text";
 	content: string;
@@ -146,6 +162,8 @@ export interface TextElement extends BaseTimelineElement {
 	opacity: number;
 	blendMode?: BlendMode;
 	effects?: Effect[];
+	stroke?: TextStroke;
+	shadow?: TextShadow;
 }
 
 export interface StickerElement extends BaseTimelineElement {

@@ -232,9 +232,43 @@ export class TextNode extends BaseNode<TextNodeParams> {
 				}
 			}
 
+			const stroke = this.params.stroke;
+			const shadow = this.params.shadow;
+
+			const applyShadow = () => {
+				if (!shadow?.enabled) return;
+				const r = parseInt(shadow.color.slice(1, 3), 16) || 0;
+				const g = parseInt(shadow.color.slice(3, 5), 16) || 0;
+				const b = parseInt(shadow.color.slice(5, 7), 16) || 0;
+				ctx.shadowColor = `rgba(${r},${g},${b},${shadow.opacity ?? 1})`;
+				ctx.shadowOffsetX = shadow.offsetX ?? 0;
+				ctx.shadowOffsetY = shadow.offsetY ?? 0;
+				ctx.shadowBlur = shadow.blur ?? 0;
+			};
+			const clearShadow = () => {
+				ctx.shadowColor = "transparent";
+				ctx.shadowOffsetX = 0;
+				ctx.shadowOffsetY = 0;
+				ctx.shadowBlur = 0;
+			};
+
 			for (let i = 0; i < lineCount; i++) {
 				const lineY = i * lineHeightPx - block.visualCenterOffset;
-				ctx.fillText(lines[i], 0, lineY);
+
+				if (stroke?.enabled && stroke.width > 0) {
+					ctx.strokeStyle = stroke.color;
+					ctx.lineWidth = stroke.outsideOnly ? stroke.width * 2 : stroke.width;
+					ctx.lineJoin = "round";
+					applyShadow();
+					ctx.strokeText(lines[i], 0, lineY);
+					clearShadow();
+					ctx.fillText(lines[i], 0, lineY);
+				} else {
+					applyShadow();
+					ctx.fillText(lines[i], 0, lineY);
+					clearShadow();
+				}
+
 				drawTextDecoration({
 					ctx,
 					textDecoration: this.params.textDecoration ?? "none",

@@ -39,7 +39,13 @@ export function useClipImport(projectId: string) {
 
 				toast.loading("Importing clip from Prognot...", { id: "clip-import" });
 
-				const response = await fetch(clipUrl);
+				// Proxy through backend to avoid R2 CORS restrictions
+				const apiBase = process.env.NEXT_PUBLIC_PROGNOT_API_URL ?? "";
+				const proxyUrl = apiBase
+					? `${apiBase}/proxy/clip?url=${encodeURIComponent(clipUrl)}`
+					: clipUrl;
+
+				const response = await fetch(proxyUrl);
 				if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
 
 				const blob = await response.blob();

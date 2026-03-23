@@ -24,12 +24,14 @@ export function useClipImport(projectId: string) {
 	const clipUrl = searchParams.get("clipUrl");
 	const clipTitle = searchParams.get("clipTitle");
 	const clipDesc = searchParams.get("clipDesc");
+	const clipGuestName = searchParams.get("clipGuestName");
 
 	useEffect(() => {
 		// Always load YouTube metadata for this project (from localStorage or URL params)
 		loadForProject(projectId, {
 			title: clipTitle ?? "",
 			description: clipDesc ?? "",
+			guestName: clipGuestName ?? "",
 		});
 
 		if (!clipUrl || hasRun.current) return;
@@ -78,6 +80,7 @@ export function useClipImport(projectId: string) {
 				params.delete("clipUrl");
 				params.delete("clipTitle");
 				params.delete("clipDesc");
+				params.delete("clipGuestName");
 				const newUrl = params.size > 0 ? `${pathname}?${params.toString()}` : pathname;
 				router.replace(newUrl);
 			} catch (error) {

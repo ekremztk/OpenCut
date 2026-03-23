@@ -92,6 +92,23 @@ export function MediaView() {
 					projectId: activeProject.metadata.id,
 					asset,
 				});
+
+				if (
+					asset.type === "video" &&
+					asset.fps !== undefined &&
+					Math.abs(asset.fps - activeProject.settings.fps) > 0.5
+				) {
+					const videoFps = asset.fps;
+					toast.warning(`FPS mismatch: video is ${videoFps} fps, timeline is ${activeProject.settings.fps} fps`, {
+						description: "Frame misalignment may cause visual glitches.",
+						action: {
+							label: `Change to ${videoFps} fps`,
+							onClick: () =>
+								editor.project.updateSettings({ settings: { fps: videoFps } }),
+						},
+						duration: 8000,
+					});
+				}
 			}
 		} catch (error) {
 			console.error("Error processing files:", error);

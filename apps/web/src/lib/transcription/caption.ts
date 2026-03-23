@@ -76,6 +76,12 @@ export function buildCaptionChunksFromWords({
 }): CaptionChunk[] {
 	if (!words || words.length === 0) return [];
 
+	// With 2 lines, distribute the total char budget across both lines
+	// so each subtitle stays within maxCharsPerLine total
+	const effectiveCharsPerLine = maxLines === 2
+		? Math.ceil(maxCharsPerLine / 2)
+		: maxCharsPerLine;
+
 	const chunks: CaptionChunk[] = [];
 	// Each entry is one line of words
 	let lines: TranscriptionWord[][] = [[]];
@@ -101,7 +107,7 @@ export function buildCaptionChunksFromWords({
 		const spaceNeeded = currentLineChars === 0 ? 0 : 1;
 		const totalNeeded = currentLineChars + spaceNeeded + wordText.length;
 
-		if (currentLineChars > 0 && totalNeeded > maxCharsPerLine) {
+		if (currentLineChars > 0 && totalNeeded > effectiveCharsPerLine) {
 			if (maxLines >= 2 && lines.length < 2) {
 				// Start a second line within the same chunk
 				lines.push([]);

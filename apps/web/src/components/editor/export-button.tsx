@@ -29,6 +29,7 @@ import {
 	SectionTitle,
 } from "@/components/editor/panels/properties/section";
 import { useEditor } from "@/hooks/use-editor";
+import { useYouTubeStore } from "@/stores/youtube-store";
 import { DEFAULT_EXPORT_OPTIONS } from "@/constants/export-constants";
 
 function isExportFormat(value: string): value is ExportFormat {
@@ -44,6 +45,7 @@ export function ExportButton() {
 	const editor = useEditor();
 
 	const hasProject = !!editor.project.getActiveOrNull();
+	const { title } = useYouTubeStore();
 
 	const handlePopoverOpenChange = ({ open }: { open: boolean }) => {
 		if (!open) {
@@ -80,15 +82,22 @@ export function ExportButton() {
 					</div>
 				</button>
 			</PopoverTrigger>
-			{hasProject && <ExportPopover onOpenChange={setIsExportPopoverOpen} />}
+			{hasProject && (
+				<ExportPopover
+					onOpenChange={setIsExportPopoverOpen}
+					defaultFileName={title || (editor.project.getActiveOrNull()?.metadata.name ?? "")}
+				/>
+			)}
 		</Popover>
 	);
 }
 
 function ExportPopover({
 	onOpenChange,
+	defaultFileName,
 }: {
 	onOpenChange: (open: boolean) => void;
+	defaultFileName: string;
 }) {
 	const editor = useEditor();
 	const activeProject = editor.project.getActive();
@@ -103,6 +112,7 @@ function ExportPopover({
 	const [shouldIncludeAudio, setShouldIncludeAudio] = useState<boolean>(
 		DEFAULT_EXPORT_OPTIONS.includeAudio ?? true,
 	);
+	const [fileName, setFileName] = useState(defaultFileName);
 
 	const handleExport = async () => {
 		if (!activeProject) return;
@@ -124,7 +134,7 @@ function ExportPopover({
 		if (result.success && result.buffer) {
 			downloadBuffer({
 				buffer: result.buffer,
-				filename: `${activeProject.metadata.name}${getExportFileExtension({ format })}`,
+				filename: `${fileName || activeProject.metadata.name}${getExportFileExtension({ format })}`,
 				mimeType: getExportMimeType({ format }),
 			});
 
@@ -151,6 +161,19 @@ function ExportPopover({
 							{isExporting ? "Exporting project" : "Export project"}
 						</h3>
 					</div>
+
+					{!isExporting && (
+						<div className="px-3 pt-3">
+							<Label className="text-xs text-muted-foreground mb-1 block">File name</Label>
+							<input
+								type="text"
+								value={fileName}
+								onChange={(e) => setFileName(e.target.value)}
+								placeholder="Enter file name..."
+								className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+							/>
+						</div>
+					)}
 
 					<div className="flex flex-col gap-4">
 						{!isExporting && (

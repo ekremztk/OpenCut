@@ -49,13 +49,13 @@ export function ReframeView() {
 						<span className="text-sm font-medium">Reframe to 9:16</span>
 					</div>
 					<p className="text-muted-foreground text-xs leading-relaxed">
-						Converts your clip to vertical format using AI face detection and
-						speaker diarization. Automatically follows the active speaker with
-						smooth transitions and hard cuts at scene changes.
+						Analyzes your clip with AI face detection and speaker diarization, then
+						applies position keyframes directly to your timeline. You can drag any
+						keyframe to manually correct the framing.
 					</p>
 					<p className="text-muted-foreground text-xs leading-relaxed">
-						Processing runs on the server — the result will appear in your
-						<strong> Media panel</strong> when ready.
+						Canvas will be set to <strong>1080×1920</strong> and cover mode enabled
+						on each clip.
 					</p>
 				</div>
 
@@ -101,10 +101,11 @@ export function ReframeView() {
 						<div className="bg-primary/10 border-primary/20 flex items-start gap-3 rounded-md border p-3">
 							<CheckCheck className="text-primary mt-0.5 size-4 shrink-0" />
 							<div className="flex flex-col gap-0.5">
-								<p className="text-sm font-medium">9:16 video ready!</p>
+								<p className="text-sm font-medium">Reframe applied!</p>
 								<p className="text-muted-foreground text-xs">
-									{results.length} video{results.length > 1 ? "s" : ""} added to your Media panel.
-									Drag to the timeline to use.
+									{results.reduce((sum, r) => sum + r.keyframeCount, 0)} keyframes
+									added to {results.length} clip{results.length > 1 ? "s" : ""}.
+									Drag keyframes in the timeline to adjust framing manually.
 								</p>
 							</div>
 						</div>

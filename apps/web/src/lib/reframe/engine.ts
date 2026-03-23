@@ -1,20 +1,20 @@
 /**
- * Backend-powered reframe engine.
+ * Backend-powered reframe engine — keyframe mode.
  *
- * Replaces the old browser-side MediaPipe engine with a Railway backend call.
- * The backend uses scene detection + face detection + Deepgram diarization
- * to produce a proper 9:16 video file uploaded to R2.
+ * Instead of rendering a new video, the backend returns per-frame crop
+ * positions converted to canvas keyframes. These are applied directly to
+ * the timeline element so the user can manually adjust any frame.
  *
  * Flow:
  *   1. Collect video elements from the timeline
  *   2. POST /reframe/process → get reframe_job_id
  *   3. Poll GET /reframe/status/{id} every 2s
- *   4. When done: download result video, add as new media asset
+ *   4. When done: apply keyframes to element + set canvas to 9:16
  */
 
 import type { EditorCore } from "@/core";
 import type { VideoTrack, VideoElement } from "@/types/timeline";
-import { processMediaAssets } from "@/lib/media/processing";
+import type { AnimationPropertyPath } from "@/types/animation";
 
 const PROGNOT_API = process.env.NEXT_PUBLIC_PROGNOT_API_URL ?? "";
 const POLL_INTERVAL_MS = 2000;
@@ -25,8 +25,13 @@ export interface ReframeProgress {
 }
 
 export interface ReframeResult {
-	outputUrl: string;
-	assetId: string;
+	elementId: string;
+	keyframeCount: number;
+}
+
+interface BackendKeyframe {
+	time_s: number;
+	offset_x: number;
 }
 
 export async function runReframe(
@@ -42,11 +47,10 @@ export async function runReframe(
 		throw new Error("NEXT_PUBLIC_PROGNOT_API_URL is not configured");
 	}
 
-	const activeProject = editor.project.getActive();
 	const results: ReframeResult[] = [];
 
 	for (let i = 0; i < videoElements.length; i++) {
-		const { element } = videoElements[i];
+		const { trackId, element } = videoElements[i];
 		const label = videoElements.length > 1 ? ` (clip ${i + 1}/${videoElements.length})` : "";
 
 		const asset = editor.media.getAssets().find((a) => a.id === element.mediaId);
@@ -74,20 +78,25 @@ export async function runReframe(
 
 		const { reframe_job_id } = await startRes.json();
 
-		// Poll for progress
-		const outputUrl = await pollReframeJob(reframe_job_id, (step, percent) => {
+		// Poll for completion
+		const { keyframes, src_w, src_h } = await pollReframeJob(reframe_job_id, (step, percent) => {
 			onProgress({ step: step + label, percent });
 		});
 
-		onProgress({ step: `Adding to media panel${label}...`, percent: 97 });
+		onProgress({ step: `Applying keyframes${label}...`, percent: 97 });
 
-		// Download result and add as media asset
-		const assetId = await addReframeAssetToProject(editor, activeProject.metadata.id, outputUrl);
+		// Apply to timeline
+		const keyframeCount = applyReframeToElement(editor, trackId, element, keyframes, src_w, src_h);
 
-		results.push({ outputUrl, assetId });
+		results.push({ elementId: element.id, keyframeCount });
 	}
 
-	onProgress({ step: "Done! Find your 9:16 video in the Media panel.", percent: 100 });
+	// Set canvas to 9:16
+	await editor.project.updateSettings({
+		settings: { canvasSize: { width: 1080, height: 1920 } },
+	});
+
+	onProgress({ step: "Done! Keyframes applied to timeline.", percent: 100 });
 	return results;
 }
 
@@ -109,7 +118,7 @@ function collectVideoElements(editor: EditorCore): Array<{ trackId: string; elem
 async function pollReframeJob(
 	reframeJobId: string,
 	onProgress: (step: string, percent: number) => void,
-): Promise<string> {
+): Promise<{ keyframes: BackendKeyframe[]; src_w: number; src_h: number }> {
 	const maxAttempts = 300; // ~10 minutes
 
 	for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -124,8 +133,12 @@ async function pollReframeJob(
 		onProgress(data.step ?? "Processing...", data.percent ?? 0);
 
 		if (data.status === "done") {
-			if (!data.output_url) throw new Error("Reframe succeeded but no output URL");
-			return data.output_url as string;
+			if (!data.keyframes) throw new Error("Reframe succeeded but no keyframes returned");
+			return {
+				keyframes: data.keyframes as BackendKeyframe[],
+				src_w: data.src_w as number,
+				src_h: data.src_h as number,
+			};
 		}
 
 		if (data.status === "error") {
@@ -136,32 +149,38 @@ async function pollReframeJob(
 	throw new Error("Reframe timed out after 10 minutes");
 }
 
-async function addReframeAssetToProject(
+function applyReframeToElement(
 	editor: EditorCore,
-	projectId: string,
-	outputUrl: string,
-): Promise<string> {
-	// Fetch the output video and convert to File for processing
-	const response = await fetch(outputUrl);
-	if (!response.ok) throw new Error(`Failed to fetch reframe output: ${response.status}`);
+	trackId: string,
+	element: VideoElement,
+	keyframes: BackendKeyframe[],
+	_src_w: number,
+	_src_h: number,
+): number {
+	const trimStart = element.trimStart ?? 0;
 
-	const blob = await response.blob();
-	const filename = `reframe_${Date.now()}.mp4`;
-	const file = new File([blob], filename, { type: "video/mp4" });
+	// Enable cover mode so the video fills the 9:16 canvas
+	editor.timeline.updateElements({
+		updates: [{ trackId, elementId: element.id, updates: { coverMode: true } }],
+	});
 
-	const dt = new DataTransfer();
-	dt.items.add(file);
+	// Convert backend keyframes (absolute video time) to element-local time
+	const kfBatch = keyframes
+		.map((kf) => ({
+			trackId,
+			elementId: element.id,
+			propertyPath: "transform.position.x" as AnimationPropertyPath,
+			time: kf.time_s - trimStart,
+			value: kf.offset_x,
+			interpolation: "linear" as const,
+		}))
+		.filter((kf) => kf.time >= 0 && kf.time <= element.duration);
 
-	const processedAssets = await processMediaAssets({ files: dt.files });
-	if (processedAssets.length === 0) throw new Error("Failed to process reframe output");
+	if (kfBatch.length > 0) {
+		editor.timeline.upsertKeyframes({ keyframes: kfBatch });
+	}
 
-	const asset = processedAssets[0];
-	await editor.media.addMediaAsset({ projectId, asset });
-
-	// Return the ID of the newly added asset
-	const allAssets = editor.media.getAssets();
-	const newAsset = allAssets.find((a) => a.name === filename);
-	return newAsset?.id ?? "";
+	return kfBatch.length;
 }
 
 function sleep(ms: number): Promise<void> {

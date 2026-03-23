@@ -1,12 +1,23 @@
-import { loadFaceLandmarker, detectFacesInFrame } from "./mediapipe-face";
-import { SceneDetector, filterCuts } from "./scene-detector";
-import { calculateCropKeyframes, type FrameAnalysis } from "./crop-calculator";
-import { splitAtSceneCuts } from "./timeline-splitter";
-import type { EditorCore } from "@/core";
-import type { VideoElement, VideoTrack } from "@/types/timeline";
+/**
+ * Backend-powered reframe engine.
+ *
+ * Replaces the old browser-side MediaPipe engine with a Railway backend call.
+ * The backend uses scene detection + face detection + Deepgram diarization
+ * to produce a proper 9:16 video file uploaded to R2.
+ *
+ * Flow:
+ *   1. Collect video elements from the timeline
+ *   2. POST /reframe/process → get reframe_job_id
+ *   3. Poll GET /reframe/status/{id} every 2s
+ *   4. When done: download result video, add as new media asset
+ */
 
-const SAMPLE_FPS = 8;
-const REFINE_FPS = 30;
+import type { EditorCore } from "@/core";
+import type { VideoTrack, VideoElement } from "@/types/timeline";
+import { processMediaAssets } from "@/lib/media/processing";
+
+const PROGNOT_API = process.env.NEXT_PUBLIC_PROGNOT_API_URL ?? "";
+const POLL_INTERVAL_MS = 2000;
 
 export interface ReframeProgress {
 	step: string;
@@ -14,154 +25,75 @@ export interface ReframeProgress {
 }
 
 export interface ReframeResult {
-	trackId: string;
-	elementId: string;
-	sceneCount: number;
-	keyframeCount: number;
+	outputUrl: string;
+	assetId: string;
 }
-
-// ─── Main Entry Point ────────────────────────────────────────────────────────
 
 export async function runReframe(
 	editor: EditorCore,
 	onProgress: (p: ReframeProgress) => void,
 ): Promise<ReframeResult[]> {
-	// 1. Find all video elements
 	const videoElements = collectVideoElements(editor);
-	if (videoElements.length === 0) throw new Error("No video elements on timeline");
-
-	// 2. Switch canvas to 9:16
-	onProgress({ step: "Switching to 9:16...", percent: 2 });
-	await editor.project.updateSettings({
-		settings: { canvasSize: { width: 1080, height: 1920 } },
-	});
-
-	// 3. Load MediaPipe
-	onProgress({ step: "Loading face detection model...", percent: 5 });
-	const landmarker = await loadFaceLandmarker((msg) =>
-		onProgress({ step: msg, percent: 8 }),
-	);
-
-	const results: ReframeResult[] = [];
-	const total = videoElements.length;
-
-	for (let ei = 0; ei < total; ei++) {
-		const { trackId, element } = videoElements[ei];
-		const basePercent = 10 + (ei / total) * 85;
-
-		const label = total > 1 ? ` (clip ${ei + 1}/${total})` : "";
-
-		// 4. Sample frames: face detection + scene detection simultaneously
-		onProgress({
-			step: `Analyzing frames${label}...`,
-			percent: Math.round(basePercent),
-		});
-
-		const asset = editor.media.getAssets().find((a) => a.id === element.mediaId);
-		if (!asset?.url) continue;
-
-		const { frames, sceneCutTimesS } = await sampleVideoFrames({
-			url: asset.url,
-			elementDuration: element.duration,
-			trimStart: element.trimStart,
-			landmarker,
-			onProgress: (p) =>
-				onProgress({
-					step: `Analyzing frames${label}... ${p}%`,
-					percent: Math.round(basePercent + (p / 100) * 45),
-				}),
-		});
-
-		onProgress({
-			step: `Found ${sceneCutTimesS.length} scene cut(s)${label}. Splitting...`,
-			percent: Math.round(basePercent + 48),
-		});
-
-		// 5. Split element at scene cuts → independent segments
-		const segments = splitAtSceneCuts(
-			editor,
-			trackId,
-			element,
-			sceneCutTimesS,
-		);
-
-		onProgress({
-			step: `Applying face tracking${label}...`,
-			percent: Math.round(basePercent + 55),
-		});
-
-		const sourceWidth = asset.width ?? 1920;
-		const sourceHeight = asset.height ?? 1080;
-		let totalKeyframes = 0;
-
-		// 6. Process each segment independently
-		for (const segment of segments) {
-			// Filter frames that belong to this segment and re-zero their time
-			const segmentFrames: FrameAnalysis[] = frames
-				.filter(
-					(f) =>
-						f.timeS >= segment.localStartS &&
-						f.timeS < segment.localEndS,
-				)
-				.map((f) => ({
-					timeS: f.timeS - segment.localStartS,
-					faces: f.faces,
-				}));
-
-			// Calculate crop keyframes with fresh EMA for this segment
-			const cropKeyframes = calculateCropKeyframes({
-				frames: segmentFrames,
-				sourceWidth,
-				sourceHeight,
-				canvasWidth: 1080,
-				canvasHeight: 1920,
-			});
-
-			// Enable cover mode
-			editor.timeline.updateElements({
-				updates: [
-					{
-						trackId: segment.trackId,
-						elementId: segment.elementId,
-						updates: { coverMode: true } as Partial<VideoElement>,
-					},
-				],
-				pushHistory: false,
-			});
-
-			// Write position.x keyframes
-			if (cropKeyframes.length > 0) {
-				editor.timeline.upsertKeyframes({
-					keyframes: cropKeyframes.map((kf) => ({
-						trackId: segment.trackId,
-						elementId: segment.elementId,
-						propertyPath: "transform.position.x" as const,
-						time: kf.timeS,
-						value: kf.offsetX,
-						interpolation: "linear" as const,
-					})),
-				});
-				totalKeyframes += cropKeyframes.length;
-			}
-		}
-
-		results.push({
-			trackId,
-			elementId: element.id,
-			sceneCount: segments.length,
-			keyframeCount: totalKeyframes,
-		});
+	if (videoElements.length === 0) {
+		throw new Error("No video elements on timeline");
 	}
 
-	onProgress({ step: "Done!", percent: 100 });
+	if (!PROGNOT_API) {
+		throw new Error("NEXT_PUBLIC_PROGNOT_API_URL is not configured");
+	}
+
+	const activeProject = editor.project.getActive();
+	const results: ReframeResult[] = [];
+
+	for (let i = 0; i < videoElements.length; i++) {
+		const { element } = videoElements[i];
+		const label = videoElements.length > 1 ? ` (clip ${i + 1}/${videoElements.length})` : "";
+
+		const asset = editor.media.getAssets().find((a) => a.id === element.mediaId);
+		if (!asset?.url) {
+			console.warn(`[Reframe] No URL for element ${element.id}, skipping`);
+			continue;
+		}
+
+		onProgress({ step: `Starting reframe${label}...`, percent: 2 });
+
+		// Start reframe job on backend
+		const startRes = await fetch(`${PROGNOT_API}/reframe/process`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				clip_url: asset.url,
+				clip_start: element.trimStart ?? 0,
+				clip_end: element.trimStart != null ? element.trimStart + element.duration : null,
+			}),
+		});
+
+		if (!startRes.ok) {
+			throw new Error(`Reframe start failed: ${startRes.status}`);
+		}
+
+		const { reframe_job_id } = await startRes.json();
+
+		// Poll for progress
+		const outputUrl = await pollReframeJob(reframe_job_id, (step, percent) => {
+			onProgress({ step: step + label, percent });
+		});
+
+		onProgress({ step: `Adding to media panel${label}...`, percent: 97 });
+
+		// Download result and add as media asset
+		const assetId = await addReframeAssetToProject(editor, activeProject.metadata.id, outputUrl);
+
+		results.push({ outputUrl, assetId });
+	}
+
+	onProgress({ step: "Done! Find your 9:16 video in the Media panel.", percent: 100 });
 	return results;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function collectVideoElements(
-	editor: EditorCore,
-): Array<{ trackId: string; element: VideoElement }> {
+function collectVideoElements(editor: EditorCore): Array<{ trackId: string; element: VideoElement }> {
 	const result: Array<{ trackId: string; element: VideoElement }> = [];
 	for (const track of editor.timeline.getTracks()) {
 		if (track.type !== "video") continue;
@@ -174,145 +106,64 @@ function collectVideoElements(
 	return result;
 }
 
-interface RawFrame extends FrameAnalysis {
-	// timeS here is element-local (from trimStart), NOT adjusted per-segment
-}
+async function pollReframeJob(
+	reframeJobId: string,
+	onProgress: (step: string, percent: number) => void,
+): Promise<string> {
+	const maxAttempts = 300; // ~10 minutes
 
-/**
- * Refines a coarse scene cut time by scanning backward at REFINE_FPS.
- *
- * The coarse detector fires AT the new scene's first sampled frame.
- * We scan backward from coarseTimeS to (coarseTimeS - intervalS) at 1/REFINE_FPS
- * steps to find the last frame of the OLD scene, then return the next frame
- * as the precise cut point.
- */
-async function refineSceneCutTime(
-	video: HTMLVideoElement,
-	sceneDetector: SceneDetector,
-	coarseTimeS: number,
-	intervalS: number,
-	trimStart: number,
-): Promise<number> {
-	const stepS = 1 / REFINE_FPS;
-	const searchStart = Math.max(0, coarseTimeS - intervalS);
+	for (let attempt = 0; attempt < maxAttempts; attempt++) {
+		await sleep(POLL_INTERVAL_MS);
 
-	// Scan forward from searchStart; find first frame the detector flags as cut
-	// Reset detector state with the frame just before searchStart
-	const preScanTime = Math.max(0, searchStart - stepS);
-	video.currentTime = trimStart + preScanTime;
-	await waitForSeek(video);
-	sceneDetector.reset();
-	sceneDetector.check(video); // seed detector with frame before scan
+		const res = await fetch(`${PROGNOT_API}/reframe/status/${reframeJobId}`);
+		if (!res.ok) {
+			throw new Error(`Status check failed: ${res.status}`);
+		}
 
-	let firstCutFrameS = coarseTimeS; // fallback: original coarse time
+		const data = await res.json();
+		onProgress(data.step ?? "Processing...", data.percent ?? 0);
 
-	for (let t = searchStart; t <= coarseTimeS + stepS / 2; t += stepS) {
-		video.currentTime = trimStart + t;
-		await waitForSeek(video);
-		const isCut = sceneDetector.check(video);
-		if (isCut) {
-			firstCutFrameS = t;
-			break;
+		if (data.status === "done") {
+			if (!data.output_url) throw new Error("Reframe succeeded but no output URL");
+			return data.output_url as string;
+		}
+
+		if (data.status === "error") {
+			throw new Error(`Reframe failed: ${data.error ?? "Unknown error"}`);
 		}
 	}
 
-	return firstCutFrameS;
+	throw new Error("Reframe timed out after 10 minutes");
 }
 
-async function sampleVideoFrames({
-	url,
-	elementDuration,
-	trimStart,
-	landmarker,
-	onProgress,
-}: {
-	url: string;
-	elementDuration: number;
-	trimStart: number;
-	landmarker: Awaited<ReturnType<typeof loadFaceLandmarker>>;
-	onProgress: (percent: number) => void;
-}): Promise<{ frames: RawFrame[]; sceneCutTimesS: number[] }> {
-	return new Promise((resolve, reject) => {
-		const video = document.createElement("video");
-		video.src = url;
-		video.muted = true;
-		video.playsInline = true;
-		video.preload = "auto";
-		video.crossOrigin = "anonymous";
+async function addReframeAssetToProject(
+	editor: EditorCore,
+	projectId: string,
+	outputUrl: string,
+): Promise<string> {
+	// Fetch the output video and convert to File for processing
+	const response = await fetch(outputUrl);
+	if (!response.ok) throw new Error(`Failed to fetch reframe output: ${response.status}`);
 
-		video.addEventListener("error", () =>
-			reject(new Error("Failed to load video for analysis")),
-		);
+	const blob = await response.blob();
+	const filename = `reframe_${Date.now()}.mp4`;
+	const file = new File([blob], filename, { type: "video/mp4" });
 
-		video.addEventListener("loadedmetadata", async () => {
-			const interval = 1 / SAMPLE_FPS;
-			const totalFrames = Math.ceil(elementDuration * SAMPLE_FPS);
-			const frames: RawFrame[] = [];
-			const rawCoarseCuts: number[] = [];
-			const sceneDetector = new SceneDetector();
+	const dt = new DataTransfer();
+	dt.items.add(file);
 
-			// ── Coarse 8fps pass ──────────────────────────────────────────────
-			for (let i = 0; i < totalFrames; i++) {
-				const elementLocalTimeS = i * interval;
-				const videoTimeS = trimStart + elementLocalTimeS;
+	const processedAssets = await processMediaAssets({ files: dt.files });
+	if (processedAssets.length === 0) throw new Error("Failed to process reframe output");
 
-				video.currentTime = videoTimeS;
-				await waitForSeek(video);
+	const asset = processedAssets[0];
+	await editor.media.addMediaAsset({ projectId, asset });
 
-				// Scene detection
-				const isSceneCut = i > 0 && sceneDetector.check(video);
-				if (isSceneCut) {
-					rawCoarseCuts.push(elementLocalTimeS);
-				} else if (i === 0) {
-					sceneDetector.check(video); // initialize detector
-				}
-
-				// Face detection
-				const timestampMs = video.currentTime * 1000;
-				const faces = await detectFacesInFrame(landmarker, video, timestampMs);
-
-				frames.push({ timeS: elementLocalTimeS, faces });
-
-				if (i % 8 === 0) {
-					onProgress(Math.round((i / totalFrames) * 100));
-				}
-			}
-
-			// ── Refine: find frame-accurate cut boundaries ────────────────────
-			// Each coarse cut is within ±(1/SAMPLE_FPS) of the real boundary.
-			// We scan at REFINE_FPS resolution to find the exact transition frame.
-			const refinedCuts: number[] = [];
-			for (const coarseTimeS of rawCoarseCuts) {
-				const refined = await refineSceneCutTime(
-					video,
-					sceneDetector,
-					coarseTimeS,
-					interval,
-					trimStart,
-				);
-				refinedCuts.push(refined);
-			}
-
-			video.src = "";
-
-			const sceneCutTimesS = filterCuts(refinedCuts, elementDuration);
-			resolve({ frames, sceneCutTimesS });
-		});
-
-		video.load();
-	});
+	// Return the ID of the newly added asset
+	const allAssets = editor.media.getAssets();
+	const newAsset = allAssets.find((a) => a.name === filename);
+	return newAsset?.id ?? "";
 }
 
-function waitForSeek(video: HTMLVideoElement): Promise<void> {
-	return new Promise((resolve) => {
-		if (!video.seeking) {
-			resolve();
-			return;
-		}
-		const onSeeked = () => {
-			video.removeEventListener("seeked", onSeeked);
-			resolve();
-		};
-		video.addEventListener("seeked", onSeeked);
-	});
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -38,8 +38,6 @@ export function ReframeView() {
 		}
 	};
 
-	const totalKeyframes = results?.reduce((sum, r) => sum + r.keyframeCount, 0) ?? 0;
-
 	return (
 		<ScrollArea className="h-full scrollbar-hidden">
 			<div className="flex flex-col gap-5 p-4">
@@ -50,9 +48,14 @@ export function ReframeView() {
 						<Smartphone className="size-4 text-primary" />
 						<span className="text-sm font-medium">Reframe to 9:16</span>
 					</div>
-					<p className="text-muted-foreground text-xs">
-						Automatically converts your 16:9 clip to vertical format with AI face
-						tracking. Detects who is speaking and keeps them centered.
+					<p className="text-muted-foreground text-xs leading-relaxed">
+						Converts your clip to vertical format using AI face detection and
+						speaker diarization. Automatically follows the active speaker with
+						smooth transitions and hard cuts at scene changes.
+					</p>
+					<p className="text-muted-foreground text-xs leading-relaxed">
+						Processing runs on the server — the result will appear in your
+						<strong> Media panel</strong> when ready.
 					</p>
 				</div>
 
@@ -63,7 +66,7 @@ export function ReframeView() {
 					</div>
 				)}
 
-				{/* Generate button */}
+				{/* Reframe button */}
 				{!results && (
 					<Button
 						className="w-full"
@@ -82,7 +85,7 @@ export function ReframeView() {
 					<div className="flex flex-col gap-1.5">
 						<div className="bg-secondary h-1.5 w-full overflow-hidden rounded-full">
 							<div
-								className="bg-primary h-full rounded-full transition-all duration-300"
+								className="bg-primary h-full rounded-full transition-all duration-500"
 								style={{ width: `${progress.percent}%` }}
 							/>
 						</div>
@@ -93,23 +96,18 @@ export function ReframeView() {
 				)}
 
 				{/* Result */}
-				{results && (
+				{results && results.length > 0 && (
 					<div className="flex flex-col gap-3">
 						<div className="bg-primary/10 border-primary/20 flex items-start gap-3 rounded-md border p-3">
 							<CheckCheck className="text-primary mt-0.5 size-4 shrink-0" />
 							<div className="flex flex-col gap-0.5">
-								<p className="text-sm font-medium">Reframe applied!</p>
+								<p className="text-sm font-medium">9:16 video ready!</p>
 								<p className="text-muted-foreground text-xs">
-									{results.reduce((s, r) => s + r.sceneCount, 0)} scene(s)
-									· {totalKeyframes} keyframes
-									· 1080×1920
+									{results.length} video{results.length > 1 ? "s" : ""} added to your Media panel.
+									Drag to the timeline to use.
 								</p>
 							</div>
 						</div>
-
-						<p className="text-muted-foreground text-center text-xs">
-							Use the timeline to review keyframes. Press Ctrl+Z to undo.
-						</p>
 
 						<button
 							onClick={reset}

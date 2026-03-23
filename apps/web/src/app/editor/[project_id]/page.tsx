@@ -18,29 +18,25 @@ import { MigrationDialog } from "@/components/editor/dialogs/migration-dialog";
 import { usePanelStore } from "@/stores/panel-store";
 import { usePasteMedia } from "@/hooks/use-paste-media";
 import { useClipImport } from "@/hooks/use-clip-import";
-import { MobileGate } from "@/components/editor/mobile-gate";
-
 export default function Editor() {
 	const params = useParams();
 	const projectId = params.project_id as string;
 
 	return (
-		<MobileGate>
-			<Suspense>
-				<EditorProvider projectId={projectId}>
-					<div className="bg-background flex h-screen w-screen flex-col overflow-hidden">
-						<EditorHeader />
-						<div className="min-h-0 min-w-0 flex-1">
-							<Suspense>
-								<EditorLayout projectId={projectId} />
-							</Suspense>
-						</div>
-						<Onboarding />
-						<MigrationDialog />
+		<Suspense>
+			<EditorProvider projectId={projectId}>
+				<div className="bg-background flex h-screen w-screen flex-col overflow-hidden">
+					<EditorHeader />
+					<div className="min-h-0 min-w-0 flex-1">
+						<Suspense>
+							<EditorLayout projectId={projectId} />
+						</Suspense>
 					</div>
-				</EditorProvider>
-			</Suspense>
-		</MobileGate>
+					<Onboarding />
+					<MigrationDialog />
+				</div>
+			</EditorProvider>
+		</Suspense>
 	);
 }
 

@@ -15,6 +15,7 @@
 import type { EditorCore } from "@/core";
 import type { VideoTrack, VideoElement } from "@/types/timeline";
 import type { AnimationPropertyPath } from "@/types/animation";
+import { useReframeMetadataStore } from "@/stores/reframe-metadata-store";
 
 const PROGNOT_API = process.env.NEXT_PUBLIC_PROGNOT_API_URL ?? "";
 const POLL_INTERVAL_MS = 2000;
@@ -46,6 +47,9 @@ export async function runReframe(
 	if (!PROGNOT_API) {
 		throw new Error("NEXT_PUBLIC_PROGNOT_API_URL is not configured");
 	}
+
+	// Get job_id if this clip was opened from the Prognot dashboard
+	const { jobId } = useReframeMetadataStore.getState();
 
 	const results: ReframeResult[] = [];
 
@@ -82,6 +86,7 @@ export async function runReframe(
 			body: JSON.stringify({
 				clip_url: clipUrl,
 				clip_local_path: clipLocalPath,
+				job_id: jobId ?? undefined,
 				clip_start: element.trimStart ?? 0,
 				clip_end: element.trimStart != null ? element.trimStart + element.duration : null,
 			}),

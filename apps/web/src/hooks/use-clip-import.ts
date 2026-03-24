@@ -5,6 +5,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { toast } from "sonner";
 import { useEditor } from "@/hooks/use-editor";
 import { useYouTubeStore } from "@/stores/youtube-store";
+import { useReframeMetadataStore } from "@/stores/reframe-metadata-store";
 import { processMediaAssets } from "@/lib/media/processing";
 
 /**
@@ -19,12 +20,14 @@ export function useClipImport(projectId: string) {
 	const pathname = usePathname();
 	const editor = useEditor();
 	const { loadForProject } = useYouTubeStore();
+	const { setJobId } = useReframeMetadataStore();
 	const hasRun = useRef(false);
 
 	const clipUrl = searchParams.get("clipUrl");
 	const clipTitle = searchParams.get("clipTitle");
 	const clipDesc = searchParams.get("clipDesc");
 	const clipGuestName = searchParams.get("clipGuestName");
+	const clipJobId = searchParams.get("clipJobId");
 
 	useEffect(() => {
 		// Always load YouTube metadata for this project (from localStorage or URL params)
@@ -33,6 +36,11 @@ export function useClipImport(projectId: string) {
 			description: clipDesc ?? "",
 			guestName: clipGuestName ?? "",
 		});
+
+		// Store job_id for reframe diarization (if clip came from pipeline)
+		if (clipJobId) {
+			setJobId(clipJobId);
+		}
 
 		if (!clipUrl || hasRun.current) return;
 		hasRun.current = true;
@@ -81,6 +89,7 @@ export function useClipImport(projectId: string) {
 				params.delete("clipTitle");
 				params.delete("clipDesc");
 				params.delete("clipGuestName");
+				params.delete("clipJobId");
 				const newUrl = params.size > 0 ? `${pathname}?${params.toString()}` : pathname;
 				router.replace(newUrl);
 			} catch (error) {

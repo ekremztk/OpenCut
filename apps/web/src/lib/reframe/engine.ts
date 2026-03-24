@@ -54,19 +54,34 @@ export async function runReframe(
 		const label = videoElements.length > 1 ? ` (clip ${i + 1}/${videoElements.length})` : "";
 
 		const asset = editor.media.getAssets().find((a) => a.id === element.mediaId);
-		if (!asset?.url) {
-			console.warn(`[Reframe] No URL for element ${element.id}, skipping`);
+		if (!asset?.file && !asset?.url) {
+			console.warn(`[Reframe] No file/URL for element ${element.id}, skipping`);
 			continue;
 		}
 
 		onProgress({ step: `Starting reframe${label}...`, percent: 2 });
+
+		// Resolve a backend-accessible URL.
+		// blob: URLs only exist in the browser — upload the file first.
+		let clipUrl: string | null = null;
+		let clipLocalPath: string | null = null;
+
+		if (asset.url && !asset.url.startsWith("blob:")) {
+			clipUrl = asset.url;
+		} else if (asset.file) {
+			onProgress({ step: `Uploading video${label}...`, percent: 5 });
+			clipLocalPath = await uploadFileToBackend(asset.file);
+		} else {
+			throw new Error("No accessible video source for reframe");
+		}
 
 		// Start reframe job on backend
 		const startRes = await fetch(`${PROGNOT_API}/reframe/process`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
-				clip_url: asset.url,
+				clip_url: clipUrl,
+				clip_local_path: clipLocalPath,
 				clip_start: element.trimStart ?? 0,
 				clip_end: element.trimStart != null ? element.trimStart + element.duration : null,
 			}),
@@ -181,6 +196,23 @@ function applyReframeToElement(
 	}
 
 	return kfBatch.length;
+}
+
+async function uploadFileToBackend(file: File): Promise<string> {
+	const formData = new FormData();
+	formData.append("file", file);
+
+	const res = await fetch(`${PROGNOT_API}/reframe/upload`, {
+		method: "POST",
+		body: formData,
+	});
+
+	if (!res.ok) {
+		throw new Error(`Video upload failed: ${res.status}`);
+	}
+
+	const { local_path } = await res.json();
+	return local_path as string;
 }
 
 function sleep(ms: number): Promise<void> {

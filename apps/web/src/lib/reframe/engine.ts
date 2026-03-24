@@ -149,6 +149,7 @@ async function pollReframeJob(
 
 		if (data.status === "done") {
 			if (!data.keyframes) throw new Error("Reframe succeeded but no keyframes returned");
+			console.log(`[Reframe] Backend done — ${data.keyframes.length} keyframes, src=${data.src_w}x${data.src_h}`);
 			return {
 				keyframes: data.keyframes as BackendKeyframe[],
 				src_w: data.src_w as number,
@@ -174,22 +175,29 @@ function applyReframeToElement(
 ): number {
 	const trimStart = element.trimStart ?? 0;
 
+	console.log(
+		`[Reframe] Element: id=${element.id} duration=${element.duration} trimStart=${trimStart} trimEnd=${element.trimEnd}`,
+	);
+	console.log(`[Reframe] Backend keyframes received: ${keyframes.length}`, keyframes.slice(0, 5));
+
 	// Enable cover mode so the video fills the 9:16 canvas
 	editor.timeline.updateElements({
 		updates: [{ trackId, elementId: element.id, updates: { coverMode: true } }],
 	});
 
-	// Convert backend keyframes (absolute video time) to element-local time
-	const kfBatch = keyframes
-		.map((kf) => ({
-			trackId,
-			elementId: element.id,
-			propertyPath: "transform.position.x" as AnimationPropertyPath,
-			time: kf.time_s - trimStart,
-			value: kf.offset_x,
-			interpolation: "linear" as const,
-		}))
-		.filter((kf) => kf.time >= 0 && kf.time <= element.duration);
+	// Convert backend keyframes (absolute video time) to element-local time.
+	// Clamp negative times to 0 (pre-trim frames) rather than filtering them out.
+	// upsertKeyframes already bounds time to [0, element.duration] internally.
+	const kfBatch = keyframes.map((kf) => ({
+		trackId,
+		elementId: element.id,
+		propertyPath: "transform.position.x" as AnimationPropertyPath,
+		time: Math.max(0, kf.time_s - trimStart),
+		value: kf.offset_x,
+		interpolation: "linear" as const,
+	}));
+
+	console.log(`[Reframe] Applying ${kfBatch.length} keyframes to element ${element.id}`);
 
 	if (kfBatch.length > 0) {
 		editor.timeline.upsertKeyframes({ keyframes: kfBatch });

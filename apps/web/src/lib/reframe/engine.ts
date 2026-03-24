@@ -14,7 +14,7 @@
 
 import type { EditorCore } from "@/core";
 import type { VideoTrack, VideoElement } from "@/types/timeline";
-import type { AnimationPropertyPath } from "@/types/animation";
+import type { AnimationPropertyPath, AnimationInterpolation } from "@/types/animation";
 import { useReframeMetadataStore } from "@/stores/reframe-metadata-store";
 
 const PROGNOT_API = process.env.NEXT_PUBLIC_PROGNOT_API_URL ?? "";
@@ -33,6 +33,7 @@ export interface ReframeResult {
 interface BackendKeyframe {
 	time_s: number;
 	offset_x: number;
+	interpolation?: "linear" | "hold";
 }
 
 export async function runReframe(
@@ -199,7 +200,7 @@ function applyReframeToElement(
 		propertyPath: "transform.position.x" as AnimationPropertyPath,
 		time: Math.max(0, kf.time_s - trimStart),
 		value: kf.offset_x,
-		interpolation: "linear" as const,
+		interpolation: (kf.interpolation ?? "linear") as AnimationInterpolation,
 	}));
 
 	console.log(`[Reframe] Applying ${kfBatch.length} keyframes to element ${element.id}`);

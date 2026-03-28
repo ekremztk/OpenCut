@@ -14,6 +14,39 @@ function getR2Client() {
 	});
 }
 
+// GET /api/media?project_id=xxx — list media assets for a project
+export async function GET(request: Request) {
+	try {
+		const { searchParams } = new URL(request.url);
+		const project_id = searchParams.get("project_id");
+		if (!project_id) return NextResponse.json({ error: "Missing project_id" }, { status: 400 });
+
+		const supabase = await createClient();
+		const { data: { user } } = await supabase.auth.getUser();
+		if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+		const { data, error } = await supabase
+			.from("editor_media_assets")
+			.select("*")
+			.eq("project_id", project_id)
+			.eq("user_id", user.id);
+
+		if (error) throw error;
+
+		// Attach public URL to each asset
+		const r2BaseUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL ?? "";
+		const assetsWithUrl = (data ?? []).map((asset) => ({
+			...asset,
+			public_url: `${r2BaseUrl}/${asset.r2_key}`,
+		}));
+
+		return NextResponse.json(assetsWithUrl);
+	} catch (err) {
+		console.error("[API /media] GET error:", err);
+		return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+	}
+}
+
 // POST /api/media — generate presigned upload URL + create DB record
 export async function POST(request: Request) {
 	try {

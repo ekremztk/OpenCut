@@ -488,5 +488,10 @@ class StorageService {
 	}
 }
 
-export const storageService = new StorageService();
+// Legacy IndexedDB service kept for migration tooling only
+export const legacyStorageService = new StorageService();
 export { StorageService };
+
+// Primary storage service — uses Supabase + R2 (server-side)
+export { apiStorageService as storageService } from "./api-service";
+export { apiStorageService } from "./api-service";

@@ -7,7 +7,9 @@ let _db: ReturnType<typeof drizzle> | null = null;
 
 function getDb() {
 	if (!_db) {
-		const client = postgres(webEnv.DATABASE_URL);
+		const url = webEnv.DATABASE_URL;
+		if (!url) throw new Error("DATABASE_URL is not set");
+		const client = postgres(url);
 		_db = drizzle(client, { schema });
 	}
 

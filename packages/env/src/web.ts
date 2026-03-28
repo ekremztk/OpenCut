@@ -9,17 +9,20 @@ const webEnvSchema = z.object({
 	// Public
 	NEXT_PUBLIC_SITE_URL: z.url().default("http://localhost:3000"),
 	NEXT_PUBLIC_MARBLE_API_URL: z.url(),
+	NEXT_PUBLIC_SUPABASE_URL: z.url(),
+	NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string(),
 
 	// Server
 	DATABASE_URL: z
 		.string()
 		.startsWith("postgres://")
-		.or(z.string().startsWith("postgresql://")),
+		.or(z.string().startsWith("postgresql://"))
+		.optional(),
 
-	BETTER_AUTH_SECRET: z.string(),
-	UPSTASH_REDIS_REST_URL: z.url(),
-	UPSTASH_REDIS_REST_TOKEN: z.string(),
-	MARBLE_WORKSPACE_KEY: z.string(),
+	BETTER_AUTH_SECRET: z.string().optional(),
+	UPSTASH_REDIS_REST_URL: z.url().optional(),
+	UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
+	MARBLE_WORKSPACE_KEY: z.string().optional(),
 	FREESOUND_CLIENT_ID: z.string(),
 	FREESOUND_API_KEY: z.string(),
 	CLOUDFLARE_ACCOUNT_ID: z.string(),

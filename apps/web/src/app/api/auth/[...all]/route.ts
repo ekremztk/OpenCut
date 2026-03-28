@@ -1,4 +1,6 @@
-import { auth } from "@/lib/auth/server";
-import { toNextJsHandler } from "better-auth/next-js";
-
-export const { POST, GET } = toNextJsHandler(auth);
+// Auth is handled by Supabase — this route is no longer used
+export function GET() {
+	return new Response(JSON.stringify({ ok: true }), {
+		headers: { "Content-Type": "application/json" },
+	});
+}
